@@ -19,7 +19,7 @@ remove_block() {
       $0==e {inblock=0; next}
       !inblock {print}
     ' "$rc" > "$tmp" && mv "$tmp" "$rc"
-    echo "🗑️  Removed ccm and ccc functions from: $rc"
+    echo "--  Removed ccm and ccc functions from: $rc"
   fi
 }
 
@@ -31,10 +31,10 @@ main() {
   local install_dir="${XDG_DATA_HOME:-$HOME/.local/share}/ccm"
   if [[ -d "$install_dir" ]]; then
     rm -rf "$install_dir"
-    echo "🗑️  Removed installed ccm assets at: $install_dir"
+    echo "--  Removed installed ccm assets at: $install_dir"
   fi
 
-  echo "✅ Uninstall complete. Reload your shell or run: source ~/.zshrc (or ~/.bashrc)"
+  echo "OK: Uninstall complete. Reload your shell or run: source ~/.zshrc (or ~/.bashrc)"
 }
 
 main "$@"

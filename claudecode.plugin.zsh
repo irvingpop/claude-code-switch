@@ -24,8 +24,11 @@ ccm() {
   fi
 
   case "$1" in
-    ""|"help"|"-h"|"--help"|"status"|"st"|"save-account"|"switch-account"|"list-accounts"|"delete-account"|"current-account")
+    ""|"help"|"-h"|"--help"|"status"|"st"|"save-account"|"switch-account"|"list-accounts"|"delete-account"|"current-account"|"oauth-create"|"oauth-list"|"oauth-delete"|"oauth-status")
       "$script" "$@"
+      ;;
+    "oauth-switch")
+      source <("$script" "$@")
       ;;
     *)
       source <("$script" "$@")
@@ -42,6 +45,8 @@ ccc() {
 Usage: ccc <model> [claude-options]
        ccc <account> [claude-options]
        ccc <model>:<account> [claude-options]
+       ccc oauth:<profile> [claude-options]
+       ccc <model>:oauth:<profile> [claude-options]
 
 Examples:
   ccc sonnet                          # Launch with Sonnet
@@ -49,6 +54,10 @@ Examples:
   ccc work                            # Switch to 'work' account and launch
   ccc opus:work                       # Switch to 'work' account and launch Opus
   ccc sonnet --dangerously-skip-permissions
+
+OAuth Examples:
+  ccc oauth:personal                  # Switch to OAuth profile 'personal'
+  ccc opus:oauth:work                 # Switch to OAuth 'work' with Opus
 
 Available models:
   sonnet, s    Claude Sonnet 4.5 (default)
@@ -71,40 +80,62 @@ EOF
     esac
   }
 
-  if [[ "$model" == *:* ]]; then
-    echo "🔄 Switching to $model..."
+  _switch_model() {
+    local model_name="$1"
+    case "$model_name" in
+      ""|claude|sonnet|s)
+        ccm sonnet || return 1
+        ;;
+      opus|o)
+        ccm opus || return 1
+        ;;
+      haiku|h)
+        ccm haiku || return 1
+        ;;
+      *)
+        echo "Error: Unknown model: $model_name" >&2
+        return 1
+        ;;
+    esac
+  }
+
+  if [[ "$model" == oauth:* ]]; then
+    local oauth_profile="${model#oauth:}"
+    echo ">> Switching to OAuth profile $oauth_profile..."
+    ccm oauth-switch "$oauth_profile" || return 1
+    _switch_model "sonnet" || return 1
+  elif [[ "$model" == *:oauth:* ]]; then
+    IFS=':' read -r model_part _ oauth_profile <<< "$model"
+    echo ">> Switching to OAuth profile $oauth_profile with $model_part..."
+    ccm oauth-switch "$oauth_profile" || return 1
+    _switch_model "$model_part" || return 1
+  elif [[ "$model" == *:* ]]; then
+    echo ">> Switching to $model..."
     IFS=':' read -r model_part account_part <<< "$model"
     ccm switch-account "$account_part" || return 1
-    if [[ -z "$model_part" ]] || [[ "$model_part" == "claude" ]] || [[ "$model_part" == "sonnet" ]]; then
-      ccm sonnet || return 1
-    elif [[ "$model_part" == "opus" ]] || [[ "$model_part" == "o" ]]; then
-      ccm opus || return 1
-    elif [[ "$model_part" == "haiku" ]] || [[ "$model_part" == "h" ]]; then
-      ccm haiku || return 1
-    else
-      echo "❌ Unknown model: $model_part" >&2
-      return 1
-    fi
+    _switch_model "$model_part" || return 1
   elif _is_known_model "$model"; then
-    echo "🔄 Switching to $model..."
+    echo ">> Switching to $model..."
     ccm "$model" || return 1
   else
     local account="$model"
-    echo "🔄 Switching account to $account..."
+    echo ">> Switching account to $account..."
     ccm switch-account "$account" || return 1
     ccm sonnet || return 1
   fi
 
   echo ""
-  echo "🚀 Launching Claude Code..."
+  echo ">> Launching Claude Code..."
   echo "   Model: $ANTHROPIC_MODEL"
-  if [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    echo "   OAuth: Set"
+  elif [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
     echo "   Token: Set"
   fi
   echo ""
 
   if ! type -p claude >/dev/null 2>&1; then
-    echo "❌ 'claude' CLI not found. Install: npm install -g @anthropic-ai/claude-code" >&2
+    echo "Error: 'claude' CLI not found. Install: npm install -g @anthropic-ai/claude-code" >&2
     return 127
   fi
 

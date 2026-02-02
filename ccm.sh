@@ -24,6 +24,10 @@ CONFIG_FILE="$HOME/.ccm_config"
 ACCOUNTS_FILE="$HOME/.ccm_accounts"
 KEYCHAIN_SERVICE="${CCM_KEYCHAIN_SERVICE:-Claude Code-credentials}"
 
+CCM_DIR="$HOME/.ccm"
+CCM_OAUTH_DIR="$CCM_DIR/oauth"
+CCM_CONFIGS_DIR="$CCM_DIR/configs"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 LANG_DIR="$SCRIPT_DIR/lang"
 
@@ -74,6 +78,14 @@ mktemp_secure() {
     chmod 600 "$tmpfile"
     trap 'rm -f "$tmpfile" 2>/dev/null' EXIT INT TERM
     echo "$tmpfile"
+}
+
+ensure_ccm_dirs() {
+    local old_umask
+    old_umask=$(umask)
+    umask 077
+    mkdir -p "$CCM_DIR" "$CCM_OAUTH_DIR" "$CCM_CONFIGS_DIR"
+    umask "$old_umask"
 }
 
 sanitize_account_name() {
@@ -245,8 +257,8 @@ switch_account() {
     account_name=$(sanitize_account_name "$1") || return 1
 
     if [[ ! -f "$ACCOUNTS_FILE" ]] || ! grep -q "^$account_name|" "$ACCOUNTS_FILE" 2>/dev/null; then
-        echo -e "${RED}$(t 'error_account_not_found' "Account '$account_name' not found")${NC}"
-        echo "$(t 'hint_list_accounts' 'Use: ccm list-accounts')"
+        echo "Error: Account '$account_name' not found" >&2
+        echo "Use: ccm list-accounts" >&2
         return 1
     fi
 
@@ -254,14 +266,14 @@ switch_account() {
     token=$(read_keychain_credentials "$account_name")
 
     if [[ -z "$token" ]]; then
-        echo -e "${RED}$(t 'error_read_keychain_failed' "Failed to read credentials for '$account_name' from Keychain")${NC}"
+        echo "Error: Failed to read credentials for '$account_name' from Keychain" >&2
         return 1
     fi
 
-    export ANTHROPIC_AUTH_TOKEN="$token"
+    echo "Switched to account: $account_name" >&2
+    echo "ANTHROPIC_AUTH_TOKEN has been set" >&2
 
-    echo -e "${GREEN}$(t 'success_account_switched' "Switched to account: $account_name")${NC}"
-    echo "$(t 'hint_auth_token_set' 'ANTHROPIC_AUTH_TOKEN has been set in your environment')"
+    echo "export ANTHROPIC_AUTH_TOKEN=\"$token\""
 }
 
 list_accounts() {
@@ -369,22 +381,287 @@ current_account() {
     fi
 }
 
+oauth_create() {
+    set_no_color
+
+    if [[ $# -lt 1 ]]; then
+        echo "$(t 'error_oauth_name_required' 'Error: OAuth profile name required')" >&2
+        echo "$(t 'usage_oauth_create' 'Usage: ccm oauth-create <name>')" >&2
+        return 1
+    fi
+
+    local profile_name
+    profile_name=$(sanitize_account_name "$1") || return 1
+
+    if ! command -v claude >/dev/null 2>&1; then
+        echo -e "${RED}$(t 'error_claude_not_found' "Error: 'claude' CLI not found")${NC}" >&2
+        echo "$(t 'hint_install_claude' 'Install: npm install -g @anthropic-ai/claude-code')" >&2
+        return 1
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo -e "${RED}$(t 'error_jq_not_found' "Error: 'jq' not found")${NC}" >&2
+        echo "$(t 'hint_install_jq' 'Install: brew install jq')" >&2
+        return 1
+    fi
+
+    ensure_ccm_dirs
+
+    local token_file="$CCM_OAUTH_DIR/${profile_name}.token"
+    local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
+    local config_file="$CCM_CONFIGS_DIR/${profile_name}.claude.json"
+
+    if [[ -f "$token_file" ]]; then
+        echo -e "${YELLOW}$(t 'warn_oauth_profile_exists' "OAuth profile '$profile_name' already exists. Overwriting...")${NC}"
+    fi
+
+    echo -e "${BLUE}$(t 'info_oauth_setup_token' 'Generating OAuth token from current Claude session...')${NC}"
+    echo "If you're not logged in to Claude, run 'claude' first to authenticate."
+    echo ""
+
+    local token_output
+    token_output=$(claude setup-token 2>&1)
+
+    local token
+    token=$(echo "$token_output" | grep -o 'sk-ant-oat01-[A-Za-z0-9_-]*' | tr -d '\n')
+
+    if [[ -z "$token" ]]; then
+        echo -e "${RED}$(t 'error_oauth_setup_token_failed' 'Failed to generate OAuth token')${NC}" >&2
+        echo "Make sure you're logged in to Claude. Run 'claude' to log in first." >&2
+        echo "Output was:" >&2
+        echo "$token_output" >&2
+        return 1
+    fi
+
+    local old_umask
+    old_umask=$(umask)
+    umask 077
+    echo "$token" > "$token_file"
+    chmod 600 "$token_file"
+    umask "$old_umask"
+
+    local claude_json="$HOME/.claude.json"
+    if [[ -f "$claude_json" ]]; then
+        local email
+        email=$(jq -r '.oauthAccount.emailAddress // empty' "$claude_json" 2>/dev/null || true)
+        if [[ -n "$email" ]]; then
+            echo "$email" > "$email_file"
+            chmod 600 "$email_file"
+        fi
+
+        cp "$claude_json" "$config_file"
+        chmod 600 "$config_file"
+    fi
+
+    echo "$profile_name" > "$CCM_OAUTH_DIR/active"
+    chmod 600 "$CCM_OAUTH_DIR/active"
+
+    echo ""
+    echo -e "${GREEN}$(t 'success_oauth_created' "OAuth profile '$profile_name' created successfully")${NC}"
+    if [[ -n "${email:-}" ]]; then
+        echo "$(t 'label_email' 'Email'): $email"
+    fi
+    echo ""
+    echo "To activate this profile, run:"
+    echo "  ccm oauth-switch $profile_name"
+}
+
+oauth_switch() {
+    set_no_color
+
+    if [[ $# -lt 1 ]]; then
+        echo "$(t 'error_oauth_name_required' 'Error: OAuth profile name required')" >&2
+        echo "$(t 'usage_oauth_switch' 'Usage: ccm oauth-switch <name>')" >&2
+        return 1
+    fi
+
+    local profile_name
+    profile_name=$(sanitize_account_name "$1") || return 1
+
+    local token_file="$CCM_OAUTH_DIR/${profile_name}.token"
+    local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
+    local config_file="$CCM_CONFIGS_DIR/${profile_name}.claude.json"
+
+    if [[ ! -f "$token_file" ]]; then
+        echo "Error: OAuth profile '$profile_name' not found" >&2
+        echo "Use: ccm oauth-list" >&2
+        return 1
+    fi
+
+    local token
+    token=$(cat "$token_file")
+
+    if [[ -z "$token" ]]; then
+        echo "Error: Token file for '$profile_name' is empty" >&2
+        return 1
+    fi
+
+    if [[ -f "$config_file" ]]; then
+        cp "$config_file" "$HOME/.claude.json" 2>/dev/null
+        chmod 600 "$HOME/.claude.json" 2>/dev/null
+    fi
+
+    echo "$profile_name" > "$CCM_OAUTH_DIR/active"
+    chmod 600 "$CCM_OAUTH_DIR/active"
+
+    local email=""
+    if [[ -f "$email_file" ]]; then
+        email=$(cat "$email_file")
+    fi
+
+    echo "Switched to OAuth profile: $profile_name" >&2
+    if [[ -n "$email" ]]; then
+        echo "Email: $email" >&2
+    fi
+    echo "CLAUDE_CODE_OAUTH_TOKEN has been set" >&2
+
+    echo "export CLAUDE_CODE_OAUTH_TOKEN=\"$token\""
+}
+
+oauth_list() {
+    set_no_color
+
+    if [[ ! -d "$CCM_OAUTH_DIR" ]]; then
+        echo "$(t 'info_no_oauth_profiles' 'No OAuth profiles found')"
+        echo "$(t 'hint_oauth_create' 'Use: ccm oauth-create <name>')"
+        return 0
+    fi
+
+    local active_profile=""
+    if [[ -f "$CCM_OAUTH_DIR/active" ]]; then
+        active_profile=$(cat "$CCM_OAUTH_DIR/active")
+    fi
+
+    local count=0
+    echo -e "${BLUE}$(t 'header_oauth_profiles' 'OAuth Profiles:')${NC}"
+    echo "----------------------------------------"
+
+    for token_file in "$CCM_OAUTH_DIR"/*.token; do
+        [[ -f "$token_file" ]] || continue
+
+        local profile_name
+        profile_name=$(basename "$token_file" .token)
+        count=$((count + 1))
+
+        local email=""
+        local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
+        if [[ -f "$email_file" ]]; then
+            email=$(cat "$email_file")
+        fi
+
+        local status=""
+        if [[ "$profile_name" == "$active_profile" ]]; then
+            status=" ${GREEN}[active]${NC}"
+        fi
+
+        if [[ -n "$email" ]]; then
+            echo -e "${GREEN}$profile_name${NC} ($email)$status"
+        else
+            echo -e "${GREEN}$profile_name${NC}$status"
+        fi
+    done
+
+    if [[ $count -eq 0 ]]; then
+        echo "$(t 'info_no_oauth_profiles' 'No OAuth profiles found')"
+        echo "$(t 'hint_oauth_create' 'Use: ccm oauth-create <name>')"
+    else
+        echo "----------------------------------------"
+        echo "$(t 'info_total_profiles' "Total: $count profile(s)")"
+    fi
+}
+
+oauth_delete() {
+    set_no_color
+
+    if [[ $# -lt 1 ]]; then
+        echo "$(t 'error_oauth_name_required' 'Error: OAuth profile name required')" >&2
+        echo "$(t 'usage_oauth_delete' 'Usage: ccm oauth-delete <name>')" >&2
+        return 1
+    fi
+
+    local profile_name
+    profile_name=$(sanitize_account_name "$1") || return 1
+
+    local token_file="$CCM_OAUTH_DIR/${profile_name}.token"
+    local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
+    local config_file="$CCM_CONFIGS_DIR/${profile_name}.claude.json"
+
+    if [[ ! -f "$token_file" ]]; then
+        echo -e "${RED}$(t 'error_oauth_profile_not_found' "OAuth profile '$profile_name' not found")${NC}" >&2
+        return 1
+    fi
+
+    rm -f "$token_file" "$email_file" "$config_file"
+
+    local active_profile=""
+    if [[ -f "$CCM_OAUTH_DIR/active" ]]; then
+        active_profile=$(cat "$CCM_OAUTH_DIR/active")
+    fi
+
+    if [[ "$profile_name" == "$active_profile" ]]; then
+        rm -f "$CCM_OAUTH_DIR/active"
+    fi
+
+    echo -e "${GREEN}$(t 'success_oauth_deleted' "OAuth profile '$profile_name' deleted")${NC}"
+}
+
+oauth_status() {
+    set_no_color
+
+    echo "$(t 'header_oauth_status' '=== OAuth Status ===')"
+    echo ""
+
+    local active_profile=""
+    if [[ -f "$CCM_OAUTH_DIR/active" ]]; then
+        active_profile=$(cat "$CCM_OAUTH_DIR/active")
+    fi
+
+    if [[ -n "$active_profile" ]]; then
+        echo -e "$(t 'label_active_profile' 'Active profile'): ${GREEN}$active_profile${NC}"
+
+        local email_file="$CCM_OAUTH_DIR/${active_profile}.email"
+        if [[ -f "$email_file" ]]; then
+            local email
+            email=$(cat "$email_file")
+            echo "$(t 'label_email' 'Email'): $email"
+        fi
+
+        local token_file="$CCM_OAUTH_DIR/${active_profile}.token"
+        if [[ -f "$token_file" ]]; then
+            local token
+            token=$(cat "$token_file")
+            echo "$(t 'label_token' 'Token'): $(mask_token "$token")"
+        fi
+    else
+        echo "$(t 'info_no_active_oauth' 'No active OAuth profile')"
+    fi
+
+    echo ""
+
+    local env_token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+    if [[ -n "$env_token" ]]; then
+        echo "$(t 'label_env_oauth_token' 'CLAUDE_CODE_OAUTH_TOKEN'): $(mask_token "$env_token")"
+    else
+        echo "$(t 'label_env_oauth_token' 'CLAUDE_CODE_OAUTH_TOKEN'): $(t 'status_not_set' 'not set')"
+    fi
+}
+
 switch_to_claude() {
-    clean_env
-    export ANTHROPIC_MODEL="${SONNET_MODEL:-claude-sonnet-4-5-20250929}"
-    export ANTHROPIC_SMALL_FAST_MODEL="${SONNET_MODEL:-claude-sonnet-4-5-20250929}"
+    echo "unset ANTHROPIC_BASE_URL"
+    echo "export ANTHROPIC_MODEL=\"${SONNET_MODEL:-claude-sonnet-4-5-20250929}\""
+    echo "export ANTHROPIC_SMALL_FAST_MODEL=\"${SONNET_MODEL:-claude-sonnet-4-5-20250929}\""
 }
 
 switch_to_opus() {
-    clean_env
-    export ANTHROPIC_MODEL="${OPUS_MODEL:-claude-opus-4-5-20251101}"
-    export ANTHROPIC_SMALL_FAST_MODEL="${HAIKU_MODEL:-claude-haiku-4-5}"
+    echo "unset ANTHROPIC_BASE_URL"
+    echo "export ANTHROPIC_MODEL=\"${OPUS_MODEL:-claude-opus-4-5-20251101}\""
+    echo "export ANTHROPIC_SMALL_FAST_MODEL=\"${HAIKU_MODEL:-claude-haiku-4-5}\""
 }
 
 switch_to_haiku() {
-    clean_env
-    export ANTHROPIC_MODEL="${HAIKU_MODEL:-claude-haiku-4-5}"
-    export ANTHROPIC_SMALL_FAST_MODEL="${HAIKU_MODEL:-claude-haiku-4-5}"
+    echo "unset ANTHROPIC_BASE_URL"
+    echo "export ANTHROPIC_MODEL=\"${HAIKU_MODEL:-claude-haiku-4-5}\""
+    echo "export ANTHROPIC_SMALL_FAST_MODEL=\"${HAIKU_MODEL:-claude-haiku-4-5}\""
 }
 
 show_status() {
@@ -423,12 +700,19 @@ Model Switching:
   opus, o [account]         Switch to Claude Opus 4.5
   haiku, h [account]        Switch to Claude Haiku 4.5
 
-Account Management:
+Account Management (API Token):
   save-account <name>       Save current ANTHROPIC_AUTH_TOKEN as named account
   switch-account <name>     Switch to a saved account
   list-accounts             List all saved accounts
   delete-account <name>     Delete a saved account
   current-account           Show currently active account
+
+OAuth Account Management (Claude.ai Subscription):
+  oauth-create <name>       Create new OAuth profile (runs claude login)
+  oauth-switch <name>       Switch to a saved OAuth profile
+  oauth-list                List all saved OAuth profiles
+  oauth-delete <name>       Delete an OAuth profile
+  oauth-status              Show OAuth account status
 
 Info & Configuration:
   status, st                Show current configuration
@@ -441,16 +725,28 @@ Examples:
   ccm switch-account work   Switch to 'work' account
   ccm list-accounts         List all saved accounts
 
+OAuth Examples:
+  ccm oauth-create personal Create OAuth profile 'personal'
+  ccm oauth-create work     Create OAuth profile 'work'
+  ccm oauth-switch personal Switch to OAuth profile 'personal'
+  ccm oauth-list            List all OAuth profiles
+
+Launcher (ccc):
+  ccc oauth:personal        Switch to OAuth 'personal' and launch
+  ccc opus:oauth:work       Switch to OAuth 'work' with Opus model
+
 Configuration:
   Config file: ~/.ccm_config
   Accounts file: ~/.ccm_accounts
+  OAuth profiles: ~/.ccm/oauth/
 
   Environment variables:
-    ANTHROPIC_AUTH_TOKEN    Your Claude API token
-    CCM_LANGUAGE            Language (en/zh)
-    SONNET_MODEL            Override Sonnet model ID
-    OPUS_MODEL              Override Opus model ID
-    HAIKU_MODEL             Override Haiku model ID
+    ANTHROPIC_AUTH_TOKEN      Your Claude API token
+    CLAUDE_CODE_OAUTH_TOKEN   OAuth token for Claude.ai subscription
+    CCM_LANGUAGE              Language (en/zh)
+    SONNET_MODEL              Override Sonnet model ID
+    OPUS_MODEL                Override Opus model ID
+    HAIKU_MODEL               Override Haiku model ID
 
 For more information, visit: https://github.com/irvingpop/claude-code-switch
 EOF
@@ -473,21 +769,21 @@ main() {
                 switch_account "$1" || return 1
             fi
             switch_to_claude
-            echo "$(t 'success_switched_to' 'Switched to') Claude Sonnet 4.5"
+            echo "Switched to Claude Sonnet 4.5" >&2
             ;;
         opus|o)
             if [[ $# -ge 1 ]]; then
                 switch_account "$1" || return 1
             fi
             switch_to_opus
-            echo "$(t 'success_switched_to' 'Switched to') Claude Opus 4.5"
+            echo "Switched to Claude Opus 4.5" >&2
             ;;
         haiku|h)
             if [[ $# -ge 1 ]]; then
                 switch_account "$1" || return 1
             fi
             switch_to_haiku
-            echo "$(t 'success_switched_to' 'Switched to') Claude Haiku 4.5"
+            echo "Switched to Claude Haiku 4.5" >&2
             ;;
         save-account)
             save_account "$@"
@@ -503,6 +799,21 @@ main() {
             ;;
         current-account)
             current_account
+            ;;
+        oauth-create)
+            oauth_create "$@"
+            ;;
+        oauth-switch)
+            oauth_switch "$@"
+            ;;
+        oauth-list)
+            oauth_list
+            ;;
+        oauth-delete)
+            oauth_delete "$@"
+            ;;
+        oauth-status)
+            oauth_status
             ;;
         status|st)
             show_status
