@@ -423,7 +423,7 @@ oauth_create() {
     token_output=$(claude setup-token 2>&1)
 
     local token
-    token=$(echo "$token_output" | grep -o 'sk-ant-oat01-[A-Za-z0-9_-]*' | tr -d '\n')
+    token=$(echo "$token_output" | grep -o 'sk-ant-oat01-[^[:space:]]*' | tr -d '\n')
 
     if [[ -z "$token" ]]; then
         echo -e "${RED}$(t 'error_oauth_setup_token_failed' 'Failed to generate OAuth token')${NC}" >&2

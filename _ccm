@@ -8,6 +8,15 @@ _ccm_accounts() {
   fi
 }
 
+_ccm_oauth_profiles() {
+  local profiles
+  local oauth_dir="${HOME}/.ccm/oauth"
+  if [[ -d "$oauth_dir" ]]; then
+    profiles=(${(f)"$(ls "$oauth_dir"/*.token 2>/dev/null | xargs -n1 basename | sed 's/\.token$//')"})
+    _describe 'oauth-profile' profiles
+  fi
+}
+
 _ccm() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
@@ -31,6 +40,11 @@ _ccm() {
         'list-accounts:List all saved accounts'
         'delete-account:Delete a saved account'
         'current-account:Show currently active account'
+        'oauth-create:Create new OAuth profile'
+        'oauth-switch:Switch to a saved OAuth profile'
+        'oauth-list:List all saved OAuth profiles'
+        'oauth-delete:Delete an OAuth profile'
+        'oauth-status:Show OAuth account status'
         'status:Show current configuration'
         'st:Show current configuration (alias)'
         'help:Show help message'
@@ -44,6 +58,9 @@ _ccm() {
           ;;
         sonnet|s|opus|o|haiku|h)
           _ccm_accounts
+          ;;
+        oauth-switch|oauth-delete)
+          _ccm_oauth_profiles
           ;;
       esac
       ;;

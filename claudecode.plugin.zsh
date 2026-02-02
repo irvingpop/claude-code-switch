@@ -3,6 +3,12 @@
 CCM_PLUGIN_DIR="${0:h}"
 CCM_SCRIPT="${CCM_PLUGIN_DIR}/ccm.sh"
 
+# Add plugin directory to fpath for completions
+fpath=("$CCM_PLUGIN_DIR" $fpath)
+
+# Autoload completion functions
+autoload -Uz _ccm _ccc
+
 if [[ ! -f "$CCM_SCRIPT" ]]; then
   echo "ccm plugin error: ccm.sh not found at $CCM_SCRIPT" >&2
   return 1
