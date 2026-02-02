@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Claude Code Commander (ccc)
-# Repo-local launcher: switch model via ccm.sh and then exec `claude`
-# This affects only the spawned `claude` process, not your parent shell.
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CCM_CMD_DEFAULT="$SCRIPT_DIR/ccm.sh"
 CCM="${CCM_CMD:-$CCM_CMD_DEFAULT}"
@@ -12,21 +8,21 @@ CCM="${CCM_CMD:-$CCM_CMD_DEFAULT}"
 usage() {
     cat <<EOF
 Usage: ./ccc <model> [claude-options]
-       ./ccc <account> [claude-options]        # Switch account then launch (default model)
+       ./ccc <account> [claude-options]
        ./ccc <model>:<account> [claude-options]
-       ./ccc pp <model> [claude-options]
 
 Examples:
-  ./ccc deepseek                     # Launch Claude Code with DeepSeek
-  ./ccc pp glm                       # Launch with PPINFRA GLM
-  ./ccc kimi --dangerously-skip-permissions  # Pass options to Claude Code
-  ./ccc woohelps                     # Switch to 'woohelps' account and launch
-  ./ccc opus:work                    # Switch to 'work' account and use Opus
+  ./ccc sonnet                          # Launch Claude Code with Sonnet
+  ./ccc opus --dangerously-skip-permissions  # Pass options to Claude Code
+  ./ccc work                            # Switch to 'work' account and launch
+  ./ccc opus:work                       # Switch to 'work' account and use Opus
 
 Available models:
-  Official: deepseek, glm, kimi, qwen, seed|doubao, claude, opus, haiku, longcat, minimax
-  PPINFRA:  pp deepseek | pp glm | pp kimi | pp qwen
-  Account:  <account> | claude:<account> | opus:<account> | haiku:<account>
+  sonnet, s           Claude Sonnet 4.5 (default)
+  opus, o             Claude Opus 4.5
+  haiku, h            Claude Haiku 4.5
+  <account>           Switch to saved account and use default model
+  <model>:<account>   Switch to saved account and use specified model
 EOF
 }
 
@@ -41,70 +37,78 @@ if [[ $# -lt 1 ]]; then
     exit 1
 fi
 
-use_pp=false
-model=""
-
-if [[ "${1:-}" == "pp" ]]; then
-    use_pp=true
-    shift || true
-fi
-
-if [[ $# -lt 1 ]]; then
-    usage
-    exit 1
-fi
-
 model="$1"
 shift || true
 
-# Remaining args are passed through to `claude`
 claude_args=("$@")
 
-# Helper: is known model keyword
 is_known_model() {
     case "$1" in
-        deepseek|ds|glm|glm4|glm4.6|kimi|kimi2|qwen|longcat|lc|minimax|mm|seed|doubao|claude|sonnet|s|opus|o|haiku|h)
+        claude|sonnet|s|opus|o|haiku|h)
             return 0 ;;
         *)
             return 1 ;;
     esac
 }
 
-# Account-only mode: `ccc <account>` (not pp, not known model, no colon)
-if ! $use_pp && [[ "$model" != *:* ]] && ! is_known_model "$model" && [[ ! "$model" =~ ^- ]]; then
+if [[ "$model" != *:* ]] && ! is_known_model "$model" && [[ ! "$model" =~ ^- ]]; then
     account="$model"
-    # 1) Switch account directly (no eval)
     if ! "$CCM" switch-account "$account"; then
         echo "❌ Failed to switch account: $account" >&2
         exit 1
     fi
-    # Show current account summary (non-fatal if it fails)
     "$CCM" current-account || true
-    # 2) Optionally set default model environment (Claude Sonnet)
-    eval "$("$CCM" claude)"
+    source <("$CCM" sonnet)
 else
-    # Configure environment for this process using repo-local ccm
-    if $use_pp; then
-        # pass no_color=true so status messages go to stderr and exports are clean on stdout
-        eval "$("$CCM" pp "$model" true)"
+    if [[ "$model" == *:* ]]; then
+        IFS=':' read -r model_part account_part <<< "$model"
+
+        if ! "$CCM" switch-account "$account_part"; then
+            echo "❌ Failed to switch account: $account_part" >&2
+            exit 1
+        fi
+
+        if [[ -z "$model_part" ]] || [[ "$model_part" == "claude" ]] || [[ "$model_part" == "sonnet" ]]; then
+            source <("$CCM" sonnet)
+        elif [[ "$model_part" == "opus" ]] || [[ "$model_part" == "o" ]]; then
+            source <("$CCM" opus)
+        elif [[ "$model_part" == "haiku" ]] || [[ "$model_part" == "h" ]]; then
+            source <("$CCM" haiku)
+        else
+            echo "❌ Unknown model: $model_part" >&2
+            exit 1
+        fi
     else
-        eval "$("$CCM" "$model")"
+        case "$model" in
+            claude|sonnet|s)
+                source <("$CCM" sonnet)
+                ;;
+            opus|o)
+                source <("$CCM" opus)
+                ;;
+            haiku|h)
+                source <("$CCM" haiku)
+                ;;
+            *)
+                echo "❌ Unknown model: $model" >&2
+                exit 1
+                ;;
+        esac
     fi
 fi
 
-# Friendly status
 echo ""
 echo "🚀 Launching Claude Code..."
 echo "   Model: ${ANTHROPIC_MODEL:-'(unset)'}"
-echo "   Base URL: ${ANTHROPIC_BASE_URL:-'Default (Anthropic)'}"
+if [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+    echo "   Token: Set"
+fi
 
-# Ensure `claude` is available
 if ! command -v claude >/dev/null 2>&1; then
     echo "❌ 'claude' CLI not found. Install it first: npm install -g @anthropic-ai/claude-code" >&2
     exit 127
 fi
 
-# Exec into Claude Code with the configured environment
 if [[ ${#claude_args[@]} -eq 0 ]]; then
     exec claude
 else

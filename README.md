@@ -1,508 +1,442 @@
-# Claude Code Model Switcher (CCM) 🔧
+# Claude Code Account Manager (CCM) 🔧
 
-> A powerful Claude Code model switching tool with support for multiple AI service providers and intelligent fallback mechanisms
+> A secure account manager for Claude Code with multi-model support and macOS Keychain integration
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bash](https://img.shields.io/badge/Language-Bash-green.svg)](https://www.gnu.org/software/bash/)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-blue.svg)](https://github.com/foreveryh/claude-code-switch)
+[![Platform](https://img.shields.io/badge/Platform-macOS-blue.svg)](https://github.com/irvingpop/claude-code-switch)
+[![Security](https://img.shields.io/badge/Security-Hardened-green.svg)](https://github.com/irvingpop/claude-code-switch)
 
-[中文文档](README_CN.md) | [English](README.md)
+## 🎯 Quick Start
 
-## 🎯 Quick Start (Zero Configuration)
-
-Want to try immediately **without any API key**? Start in 3 steps:
+Install and start using Claude Code Account Manager in 3 steps:
 
 ```bash
-# 1. Install
-curl -fsSL https://raw.githubusercontent.com/foreveryh/claude-code-switch/main/quick-install.sh | bash
+# 1. Clone and install
+git clone https://github.com/irvingpop/claude-code-switch.git
+cd claude-code-switch
+./install.sh
 
 # 2. Reload shell
 source ~/.zshrc  # or source ~/.bashrc for bash
 
-# 3. Try it (no keys needed!)
-ccm glm          # Switch to GLM-4.6
-ccc deepseek     # Launch Claude Code with DeepSeek
+# 3. Use it!
+ccm sonnet                  # Switch to Sonnet model
+ccm save-account work       # Save your current token as 'work'
+ccm opus work               # Switch to Opus using 'work' account
 ```
-
-✨ **That's it!** You now have a working Claude Code setup with:
-- ✅ Built-in experience keys (via PPINFRA)
-- ✅ Zero configuration required
-- ✅ Multiple model support
-- ✅ Add your own API keys later for unlimited usage
 
 ## 🌟 Features
 
-- 🤖 **Multi-model Support**: Claude, Deepseek, KIMI, GLM, Qwen and other mainstream AI models
-- 🔄 **Smart Fallback Mechanism**: Official API priority with automatic fallback to PPINFRA backup service
-- ⚡ **Quick Switching**: One-click switching between different AI models to boost productivity
-- 🚀 **One-Command Launch**: `ccc` command switches model and launches Claude Code in a single step
-- 🎨 **Colorful Interface**: Intuitive command-line interface with clear switching status display
-- 🛡️ **Secure Configuration**: Independent configuration file for API key management
-- 📊 **Status Monitoring**: Real-time display of current model configuration and key status
+- 🔐 **Secure Account Management**: Store multiple Claude Pro accounts securely in macOS Keychain
+- 🤖 **Multi-Model Support**: Easily switch between Claude Sonnet 4.5, Opus 4.5, and Haiku 4.5
+- ⚡ **Quick Switching**: One-command model and account switching
+- 🚀 **One-Command Launch**: `ccc` command switches model and launches Claude Code instantly
+- 🛡️ **Security Hardened**:
+  - Secure file permissions (600) for all config files
+  - Input validation on account names
+  - No credentials in shell history
+  - Secure temporary file handling
+  - Token masking in status output
+- 🎨 **Clean Interface**: Color-coded output with clear status messages
+- 🔌 **Oh-My-Zsh Plugin**: Install as a zsh plugin or use standalone
 
 ## 📦 Supported Models
 
-| Model | Official Support | Fallback Support(PPINFRA) | Features |
-|-------|------------------|---------------------------|----------|
-| 🌙 **KIMI for Coding** | ✅ kimi-for-coding | ✅ kimi-k2-turbo-preview | Kimi official coding version |
-| 🌕 **KIMI CN** | ✅ kimi-k2-thinking | ✅ kimi-k2-thinking | Kimi China domestic version |
-| 🤖 **Deepseek** | ✅ deepseek-chat | ✅ deepseek/deepseek-v3.2-exp | Cost-effective reasoning |
-| 🌰 **Doubao Seed-Code** | ✅ doubao-seed-code-preview-latest | ❌ Official only | Volcano Engine, code-optimized |
-| 🐱 **LongCat** | ✅ LongCat-Flash-Chat | ❌ Official only | High-speed chat |
-| 🎯 **MiniMax M2** | ✅ MiniMax-M2 | ✅ minimax/minimax-m2 | Code & reasoning |
-| 🌊 **StreamLake (KAT)** | ✅ KAT-Coder | ❌ Official only | StreamLake AI |
-| 🐪 **Qwen** | ✅ qwen3-max (Alibaba DashScope) | ✅ qwen3-next-80b-a3b-thinking | Alibaba Cloud official |
-| 🇨🇳 **GLM4.6** | ✅ glm-4.6 | ✅ zai-org/glm-4.6 | Zhipu AI |
-| 🧠 **Claude Sonnet 4.5** | ✅ claude-sonnet-4-5-20250929 | ❌ Official only | Balanced performance |
-| 🚀 **Claude Opus 4.5** | ✅ claude-opus-4-5-20251101 | ❌ Official only | Strongest reasoning |
-| 🔷 **Claude Haiku 4.5** | ✅ claude-haiku-4-5 | ❌ Official only | Fast and efficient |
-
-> 🎁 **GLM-4.6 Official Registration**
->
-> Get started with Zhipu AI's official Claude Code integration:
-> - **Registration Link**: https://www.bigmodel.cn/claude-code?ic=5XMIOZPPXB
-> - **Invitation Code**: `5XMIOZPPXB`
->
-> GLM-4.6 supports official Claude Code integration with zero-configuration experience. No API key needed to get started!
-
-> 💰 **PPINFRA Fallback Service Registration**
->
-> Get **¥15 voucher** when registering PPINFRA service:
-> - **Registration Link**: https://ppio.com/user/register?invited_by=ZQRQZZ
-> - **Invitation Code**: `ZQRQZZ`
->
-> PPINFRA provides reliable fallback service for Deepseek, KIMI, Qwen, and GLM models when official APIs are unavailable.
+| Model | Model ID | Description |
+|-------|----------|-------------|
+| 🧠 **Sonnet 4.5** | claude-sonnet-4-5-20250929 | Balanced performance (default) |
+| 🚀 **Opus 4.5** | claude-opus-4-5-20251101 | Strongest reasoning capability |
+| 🔷 **Haiku 4.5** | claude-haiku-4-5 | Fast and efficient |
 
 ## 🛠️ Installation
 
-### Method 1: Quick Install (Recommended) ⚡
-
-One-command installation from GitHub - no cloning required:
+### Method 1: Standalone Installation (Bash/Zsh)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/foreveryh/claude-code-switch/main/quick-install.sh | bash
-source ~/.zshrc  # reload shell
-```
-
-**Features:**
-- ✅ No cloning needed
-- ✅ Automatic file download from GitHub
-- ✅ Retry mechanism for network failures
-- ✅ File integrity verification
-- ✅ Progress feedback and error handling
-
-### Method 2: Local Install (For Development)
-
-Clone the repository and install locally:
-
-```bash
-git clone https://github.com/foreveryh/claude-code-switch.git
+git clone https://github.com/irvingpop/claude-code-switch.git
 cd claude-code-switch
-chmod +x install.sh ccm.sh
 ./install.sh
-source ~/.zshrc  # reload shell
+source ~/.zshrc  # or source ~/.bashrc
 ```
 
-**Without installation** (run from cloned directory):
+This installs `ccm()` and `ccc()` shell functions to your rc file.
+
+### Method 2: Oh-My-Zsh Plugin
+
 ```bash
-./ccc deepseek                   # Launch with DeepSeek (current process only)
-eval "$(./ccm env deepseek)"    # Set env vars in current shell only
+# Clone to oh-my-zsh custom plugins directory
+git clone https://github.com/irvingpop/claude-code-switch.git \
+  ~/.oh-my-zsh/custom/plugins/claudecode
+
+# Add to your ~/.zshrc plugins list
+plugins=(git docker ... claudecode)
+
+# Reload shell
+source ~/.zshrc
 ```
 
-### What Gets Installed?
-
-The installation process:
-- Copies `ccm.sh` to `~/.local/share/ccm/ccm.sh`
-- Copies language files to `~/.local/share/ccm/lang/`
-- Injects `ccm()` and `ccc()` shell functions into your rc file (~/.zshrc or ~/.bashrc)
-- Creates `~/.ccm_config` on first use (if it doesn't exist)
-
-**Does NOT:**
-- Modify system files
-- Change your PATH
-- Require sudo/root access
-- Affect other shell configurations
-
-## ⚙️ Configuration
-
-### 🔑 Configuration Priority
-
-CCM uses a hierarchical configuration system:
-
-1. **Environment Variables** (Highest Priority)
-   ```bash
-   export DEEPSEEK_API_KEY=sk-your-key
-   export KIMI_API_KEY=your-key
-   export GLM_API_KEY=your-key
-   export QWEN_API_KEY=your-key
-   ```
-
-2. **Configuration File** `~/.ccm_config` (Fallback)
-   ```bash
-   ccm config              # Opens config in your editor
-   # Or edit manually: vim ~/.ccm_config
-   ```
-
-### Configuration File Example
+### Method 3: Direct Usage (No Installation)
 
 ```bash
-# CCM Configuration File
-# Note: Environment variables take priority over this file
+git clone https://github.com/irvingpop/claude-code-switch.git
+cd claude-code-switch
+./ccc sonnet  # Launch directly
+```
 
-# Official API keys
-DEEPSEEK_API_KEY=sk-your-deepseek-api-key
-KIMI_API_KEY=your-kimi-api-key  # Moonshot AI
-LONGCAT_API_KEY=your-longcat-api-key
-MINIMAX_API_KEY=your-minimax-api-key
-GLM_API_KEY=your-glm-api-key
-QWEN_API_KEY=your-qwen-api-key  # Alibaba Cloud DashScope
+## 📖 Usage
 
-# Optional: override model IDs (if omitted, defaults are used)
-DEEPSEEK_MODEL=deepseek-chat
-KIMI_MODEL=kimi-for-coding  # For KIMI for Coding
-KIMI_CN_MODEL=kimi-k2-thinking  # For KIMI CN (domestic version)
-LONGCAT_MODEL=LongCat-Flash-Thinking
-MINIMAX_MODEL=MiniMax-M2
-QWEN_MODEL=qwen3-max
-GLM_MODEL=glm-4.6
-CLAUDE_MODEL=claude-sonnet-4-5-20250929
+### Model Switching
+
+Switch between Claude models in your current shell:
+
+```bash
+ccm sonnet                  # Switch to Sonnet 4.5
+ccm opus                    # Switch to Opus 4.5
+ccm haiku                   # Switch to Haiku 4.5
+
+# Short aliases
+ccm s                       # Sonnet
+ccm o                       # Opus
+ccm h                       # Haiku
+```
+
+### Account Management
+
+Manage multiple Claude Pro accounts:
+
+```bash
+# Save current account
+export ANTHROPIC_AUTH_TOKEN=sk-ant-your-token-here
+ccm save-account work       # Save as 'work' account
+
+# Switch between accounts
+ccm switch-account work     # Switch to 'work' account
+ccm switch-account personal # Switch to 'personal' account
+
+# List all saved accounts
+ccm list-accounts
+
+# Show current account
+ccm current-account
+
+# Delete an account
+ccm delete-account old-account
+```
+
+### Combined Model + Account Switching
+
+Switch both model and account in one command:
+
+```bash
+# Switch to account first, then model
+ccm opus work              # Switch to 'work' account, then Opus
+ccm sonnet personal        # Switch to 'personal' account, then Sonnet
+```
+
+### Launch Claude Code
+
+Use `ccc` to switch and launch Claude Code in one command:
+
+```bash
+ccc sonnet                 # Launch with Sonnet
+ccc opus                   # Launch with Opus
+ccc work                   # Launch with 'work' account (default model)
+ccc opus:work              # Launch with 'work' account using Opus
+
+# Pass options to Claude Code
+ccc sonnet --dangerously-skip-permissions
+```
+
+### Configuration & Status
+
+```bash
+ccm status                 # Show current configuration
+ccm st                     # Short alias for status
+ccm help                   # Show help message
+```
+
+## 📋 Configuration
+
+### Configuration File
+
+Location: `~/.ccm_config`
+
+```bash
+# Model overrides (optional)
+SONNET_MODEL=claude-sonnet-4-5-20250929
 OPUS_MODEL=claude-opus-4-5-20251101
-
-# Fallback service (only enabled when official keys are missing)
-PPINFRA_API_KEY=your-ppinfra-api-key
+HAIKU_MODEL=claude-haiku-4-5
 ```
 
-**Security Note:** Recommend `chmod 600 ~/.ccm_config` to protect your API keys.
+This file is automatically created with secure permissions (600) on first use.
 
-## 🔐 Claude Pro Account Management (NEW in v2.2.0)
+### Accounts File
 
-CCM now supports managing multiple Claude Pro subscription accounts! Switch between accounts to bypass usage limits without upgrading to Claude Max.
+Location: `~/.ccm_accounts`
 
-### Why Use Multiple Accounts?
+Stores account metadata (names and timestamps). Credentials are stored securely in macOS Keychain.
 
-- **Bypass Usage Limits**: Each Claude Pro account has its own usage limits (5 hours per day, weekly caps)
-- **Cost-Effective**: Multiple Pro accounts are cheaper than one Max account
-- **Seamless Switching**: No need to log out/in - CCM handles authentication automatically
-- **Secure Storage**: Account credentials stored securely in macOS Keychain with local backup
+File format:
+```
+account_name|timestamp
+work|2026-02-02T10:30:00Z
+personal|2026-02-01T15:45:00Z
+```
+
+### Environment Variables
+
+```bash
+# Claude authentication token (set by ccm switch-account)
+ANTHROPIC_AUTH_TOKEN=sk-ant-...
+
+# Model configuration (set by ccm model commands)
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+ANTHROPIC_SMALL_FAST_MODEL=claude-sonnet-4-5-20250929
+
+# Model overrides (override config file)
+SONNET_MODEL=claude-sonnet-4-5-20250929
+OPUS_MODEL=claude-opus-4-5-20251101
+HAIKU_MODEL=claude-haiku-4-5
+
+# Keychain service name (advanced)
+CCM_KEYCHAIN_SERVICE="Claude Code-credentials"
+```
+
+## 🔐 Security Features
+
+### Implemented Security Hardening
+
+1. **Secure File Permissions**
+   - All config files created with umask 077 and chmod 600
+   - Prevents unauthorized access to configuration data
+
+2. **Input Validation**
+   - Account names validated: alphanumeric, hyphens, underscores only
+   - Maximum 64 character length
+   - Prevents command injection and path traversal
+
+3. **No Credentials in Shell History**
+   - Uses `source <(ccm command)` instead of `eval "$(ccm command)"`
+   - Credentials never appear in shell history
+
+4. **Secure Temporary Files**
+   - Uses mktemp with secure permissions (600)
+   - Automatic cleanup with trap handlers
+
+5. **Token Masking**
+   - Status output shows only first 4 + last 4 characters
+   - Full tokens never printed to terminal
+
+6. **Keychain Integration**
+   - Credentials stored in macOS Keychain, not config files
+   - Leverages OS-level encryption and access control
+
+### Security Best Practices
+
+```bash
+# Verify config file permissions
+ls -la ~/.ccm_config        # Should show -rw------- (600)
+ls -la ~/.ccm_accounts      # Should show -rw------- (600)
+
+# Manual keychain operations (if needed)
+# List CCM keychain entries
+security find-generic-password -s "Claude Code-credentials" -a "ccm-work"
+
+# Delete keychain entry manually
+security delete-generic-password -s "Claude Code-credentials" -a "ccm-work"
+```
+
+## 🎯 Common Workflows
+
+### Daily Development Workflow
+
+```bash
+# Morning: switch to work account and start coding
+ccm switch-account work
+ccc sonnet
+
+# Need more power? Switch to Opus
+ccm opus
+
+# Quick testing with Haiku
+ccm haiku
+```
+
+### Managing Multiple Accounts
+
+```bash
+# Save accounts
+export ANTHROPIC_AUTH_TOKEN=sk-ant-work-token
+ccm save-account work
+
+export ANTHROPIC_AUTH_TOKEN=sk-ant-personal-token
+ccm save-account personal
+
+# List and verify
+ccm list-accounts
+
+# Switch between them
+ccm switch-account work
+ccm switch-account personal
+```
+
+### One-Command Launch Patterns
+
+```bash
+# Launch with specific model
+ccc sonnet
+ccc opus
+ccc haiku
+
+# Launch with specific account (uses default model)
+ccc work
+ccc personal
+
+# Launch with both account and model
+ccc opus:work
+ccc sonnet:personal
+
+# Launch with account using colon syntax
+ccc :work                  # Uses default model (Sonnet)
+```
+
+## 📊 Command Reference
+
+### Model Commands
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `ccm sonnet` | `ccm s`, `ccm claude` | Switch to Claude Sonnet 4.5 |
+| `ccm opus` | `ccm o` | Switch to Claude Opus 4.5 |
+| `ccm haiku` | `ccm h` | Switch to Claude Haiku 4.5 |
 
 ### Account Management Commands
 
+| Command | Description |
+|---------|-------------|
+| `ccm save-account <name>` | Save current ANTHROPIC_AUTH_TOKEN as named account |
+| `ccm switch-account <name>` | Switch to a saved account |
+| `ccm list-accounts` | List all saved accounts |
+| `ccm delete-account <name>` | Delete a saved account |
+| `ccm current-account` | Show currently active account |
+
+### Info Commands
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `ccm status` | `ccm st` | Show current configuration |
+| `ccm help` | `ccm -h`, `ccm --help` | Show help message |
+
+### Launch Commands
+
+| Command | Description |
+|---------|-------------|
+| `ccc <model>` | Switch model and launch Claude Code |
+| `ccc <account>` | Switch account and launch Claude Code |
+| `ccc <model>:<account>` | Switch both and launch Claude Code |
+
+## 🔄 Migration from v2.x
+
+If you're upgrading from the multi-model version (v2.x):
+
+1. **Account data is preserved** - Existing accounts in `~/.ccm_accounts` continue to work
+2. **Config file changes** - Old config file is automatically migrated
+3. **Removed commands**:
+   - `ccm deepseek`, `ccm glm`, `ccm kimi`, `ccm qwen`, etc.
+   - `ccm pp <model>` (PPINFRA routing)
+   - `ccm config` (simplified config doesn't need editor)
+   - `ccm env <model>` (simplified away)
+
+## 🐛 Troubleshooting
+
+### Keychain Issues
+
+If you encounter keychain errors:
+
 ```bash
-# Save current logged-in account
-ccm save-account work              # Save as "work"
-ccm save-account personal          # Save as "personal"
+# Manually verify keychain entry
+security find-generic-password -s "Claude Code-credentials" -a "ccm-work"
 
-# Switch between accounts
-ccm switch-account work            # Switch to work account
-ccm switch-account personal        # Switch to personal account
+# Delete and re-save account
+ccm delete-account work
+export ANTHROPIC_AUTH_TOKEN=sk-ant-your-token
+ccm save-account work
+```
 
-# View all saved accounts
+### Permission Issues
+
+```bash
+# Fix config file permissions
+chmod 600 ~/.ccm_config
+chmod 600 ~/.ccm_accounts
+
+# Verify
+ls -la ~/.ccm_*
+```
+
+### Account Not Switching
+
+```bash
+# Verify account exists
 ccm list-accounts
-# Output:
-# 📋 Saved Claude Pro accounts:
-#   - work (Pro, expires: 2025-12-31, ✅ active)
-#   - personal (Pro, expires: 2025-12-31)
 
 # Check current account
 ccm current-account
 
-# Delete saved account
-ccm delete-account old-account
+# Try switching again
+ccm switch-account work
+
+# Verify token is set
+echo $ANTHROPIC_AUTH_TOKEN | head -c 10
 ```
 
-### Quick Account Switching with Models
+### Shell Function Not Found
 
 ```bash
-# Switch account and select model in one command
-ccm opus:work                      # Switch to work account, use Opus
-ccm haiku:personal                 # Switch to personal account, use Haiku
-ccc opus:work                      # Switch account and launch Claude Code
-ccc woohelps                       # Switch to 'woohelps' account and launch (default model)
-```
+# Reload shell configuration
+source ~/.zshrc  # or source ~/.bashrc
 
-### Account Setup Guide
+# Verify function is loaded
+type ccm
 
-**Step 1**: Save your first account
-```bash
-# Login to Claude Code with account 1 in browser
-# Launch Claude Code to verify it works
-ccm save-account account1
-```
-
-**Step 2**: Save additional accounts
-```bash
-# Quit Claude Code
-# Logout from claude.ai in browser
-# Login with account 2
-# Launch Claude Code again
-ccm save-account account2
-```
-
-**Step 3**: Switch between accounts anytime
-```bash
-ccm switch-account account1        # No browser login needed!
-# Restart Claude Code for changes to take effect
-```
-
-**Important Notes**:
-- Tokens are refreshed automatically - no re-login needed until they expire
-- After switching accounts, restart Claude Code for changes to take effect
-- Account credentials are primarily stored in macOS Keychain (most secure)
-- Local backup stored in `~/.ccm_accounts` with base64 encoding and chmod 600 permissions
-- Credentials persist across system reboots
-- Keychain service name defaults to `Claude Code-credentials`. Override via `CCM_KEYCHAIN_SERVICE` if your system uses a different name
-
-**Security Considerations**:
-- Always use `chmod 600 ~/.ccm_accounts` to protect your local backup
-- The system relies on macOS Keychain for secure credential storage
-- Local backup uses base64 encoding (not encryption) for compatibility
-
-### Debugging Keychain
-
-```bash
-ccm debug-keychain                # Inspect current Keychain credentials and match saved accounts
-# If it shows no credentials but you are logged in, set service override:
-CCM_KEYCHAIN_SERVICE="Claude Code" ccm debug-keychain
-```
-
-### Troubleshooting Account Management
-
-**Problem**: "No credentials found in Keychain"
-- Solution: Make sure you're logged into Claude Code in your browser or IDE
-- Try different keychain service names with `CCM_KEYCHAIN_SERVICE` environment variable
-
-**Problem**: "Account switching doesn't work"
-- Solution: Restart Claude Code after switching accounts
-- Check that the account exists with `ccm list-accounts`
-
-**Problem**: "Permission denied accessing accounts file"
-- Solution: Run `chmod 600 ~/.ccm_accounts` to fix permissions
-
-**Problem**: "JSON format error in accounts file"
-- Solution: Delete `~/.ccm_accounts` and re-save your accounts
-
-## 📖 Usage
-
-### Two Ways to Use CCM
-
-**Method 1: `ccm` - Environment Management**
-```bash
-ccm deepseek      # Switch to DeepSeek
-ccm glm           # Switch to GLM4.6
-ccm pp kimi       # Switch to PPINFRA KIMI
-claude            # Then manually launch Claude Code
-```
-
-**Method 2: `ccc` - One-Command Launch (Recommended)**
-```bash
-ccc deepseek                            # Switch and launch
-ccc pp glm                              # Switch to PPINFRA and launch
-ccc kimi --dangerously-skip-permissions # Pass options to Claude Code
-```
-
-### Basic Commands
-
-```bash
-# Switch to different models
-ccm kimi          # Switch to KIMI for Coding (official coding version)
-ccm kimi-cn       # Switch to KIMI CN (China domestic version)
-ccm deepseek      # Switch to Deepseek
-ccm seed          # Switch to Doubao Seed-Code
-ccm minimax       # Switch to MiniMax M2
-ccm qwen          # Switch to Qwen
-ccm kat           # Switch to StreamLake (KAT)
-ccm glm           # Switch to GLM4.6
-ccm longcat       # Switch to LongCat
-ccm claude        # Switch to Claude Sonnet 4.5
-ccm opus          # Switch to Claude Opus 4.5
-ccm haiku         # Switch to Claude Haiku 4.5
-
-# Switch to PPINFRA service
-ccm pp            # Interactive PPINFRA model selection
-ccm pp deepseek   # Direct switch to PPINFRA DeepSeek
-ccm pp glm        # Direct switch to PPINFRA GLM
-ccm pp kimi       # Direct switch to PPINFRA KIMI
-ccm pp minimax    # Direct switch to PPINFRA MiniMax M2
-ccm pp qwen       # Direct switch to PPINFRA Qwen
-
-# Launch Claude Code
-ccc deepseek      # Switch to DeepSeek and launch
-ccc seed          # Switch to Seed-Code and launch
-ccc pp glm        # Switch to PPINFRA GLM and launch
-ccc opus          # Switch to Claude Opus and launch
-ccc kat           # Switch to StreamLake (KAT) and launch
-
-# Utility commands
-ccm status        # View current status (masked)
-ccm config        # Edit configuration
-ccm help          # Show help
-ccc               # Show ccc usage help
-```
-
-### Command Shortcuts
-
-```bash
-# ccm shortcuts
-ccm ds           # Short for deepseek
-ccm mm           # Short for minimax
-ccm s            # Short for claude sonnet
-ccm o            # Short for opus (Claude Opus 4.5)
-ccm h            # Short for haiku
-ccm st           # Short for status
-
-# ccc shortcuts
-ccc ds           # Launch with DeepSeek
-ccc pp ds        # Launch with PPINFRA DeepSeek
-ccc kat          # Launch with StreamLake (KAT)
-```
-
-### Usage Examples
-
-**Example 1: Zero configuration (built-in keys)**
-```bash
-ccc deepseek
-🔄 Switching to deepseek...
-✅ Environment configured for: DeepSeek
-
-🚀 Launching Claude Code...
-   Model: deepseek-chat
-   Base URL: https://api.ppinfra.com/anthropic
-```
-
-**Example 2: With your own API keys**
-```bash
-export KIMI_API_KEY=your-moonshot-key
-ccm kimi
-ccm status
-📊 Current model configuration:
-   BASE_URL: https://api.moonshot.cn/anthropic
-   AUTH_TOKEN: [Set]
-   MODEL: kimi-k2-turbo-preview
-   SMALL_MODEL: kimi-k2-turbo-preview
-
-claude  # Launch manually
-```
-
-**Example 3: One-command launch**
-```bash
-ccc pp glm --dangerously-skip-permissions
-🔄 Switching to PPINFRA glm...
-✅ Environment configured for: GLM (PPINFRA)
-
-🚀 Launching Claude Code...
-   Model: zai-org/glm-4.6
-   Base URL: https://api.ppinfra.com/anthropic
-```
-
-## 🔧 Advanced Features
-
-### Smart Fallback Mechanism
-
-CCM implements intelligent fallback:
-- **Official API Priority**: Uses official service if official keys are configured
-- **Auto Fallback**: Automatically switches to PPINFRA backup service when official keys are missing
-- **Transparent Switching**: Seamless to users, commands remain consistent
-
-### Service Integrations
-
-**Alibaba Cloud DashScope** (Qwen models):
-- Base URL: `https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy`
-- Default Models: `qwen3-max` (primary), `qwen3-next-80b-a3b-instruct` (fast)
-- API Key Format: Standard `sk-` prefix from Alibaba Cloud console
-
-**PPINFRA Fallback Service**:
-- Base URL: `https://api.ppinfra.com/anthropic`
-- Supported models:
-  - `kimi-k2-turbo-preview` (KIMI fallback)
-  - `deepseek/deepseek-v3.2-exp` (Deepseek fallback)
-  - `MiniMax-M2` (MiniMax official)
-  - `minimax/minimax-m2` (MiniMax PPINFRA fallback)
-  - `qwen3-next-80b-a3b-thinking` (Qwen fallback)
-  - `zai-org/glm-4.6` (GLM fallback)
-
-### Security and Privacy
-
-- Status output masks secrets (shows only first/last 4 chars)
-- CCM sets only `ANTHROPIC_AUTH_TOKEN` (not `ANTHROPIC_API_KEY`)
-- Configuration file precedence: Environment Variables > ~/.ccm_config
-- Recommended file permission: `chmod 600 ~/.ccm_config`
-
-## 🗑️ Uninstall
-
-```bash
-# If installed via quick-install.sh or install.sh
-./uninstall.sh
-
-# Or manually:
-# 1. Remove the ccm/ccc function blocks from ~/.zshrc or ~/.bashrc
-# 2. Delete the installation directory
-rm -rf ~/.local/share/ccm
-rm ~/.ccm_config  # optional: remove config file
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**Q: Getting "XXX_API_KEY not detected" error**
-```bash
-A: Check if the API key is correctly configured:
-   ccm config      # Open config file to check
-   ccm status      # View current configuration
-```
-
-**Q: Claude Code doesn't work after switching**
-```bash
-A: Verify environment variables:
-   ccm status                   # Check current status
-   echo $ANTHROPIC_BASE_URL     # Check environment variable
-   env | grep ANTHROPIC         # List all ANTHROPIC vars
-```
-
-**Q: Want to use official service instead of fallback**
-```bash
-A: Configure the official API key, CCM will automatically prioritize it:
-   export DEEPSEEK_API_KEY=sk-your-official-key
-   ccm deepseek
-```
-
-**Q: Auth conflict about API_KEY vs AUTH_TOKEN**
-```bash
-A: CCM only sets ANTHROPIC_AUTH_TOKEN, unset any conflicting variable:
-   unset ANTHROPIC_API_KEY
+# Re-install if needed
+cd claude-code-switch
+./install.sh
 ```
 
 ## 🤝 Contributing
 
-Issues and Pull Requests are welcome!
+Contributions welcome! Please feel free to submit a Pull Request.
 
-### Development Setup
-```bash
-git clone https://github.com/foreveryh/claude-code-switch.git
-cd claude-code-switch
-```
-
-### Commit Guidelines
-- Use clear commit messages
-- Add appropriate tests
-- Update documentation
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+MIT License - see [LICENSE](LICENSE) for details
 
 ## 🙏 Acknowledgments
 
-- [Claude](https://claude.ai) - AI Assistant
-- [Deepseek](https://deepseek.com) - Efficient reasoning model
-- [KIMI](https://kimi.moonshot.cn) - Long text processing
-- [MiniMax](https://www.minimaxi.com) - MiniMax M2 model
-- [Zhipu AI](https://zhipuai.cn) - GLM large model
-- [Qwen](https://qwen.alibaba.com) - Alibaba Tongyi Qianwen
-- [Doubao](https://www.volcengine.com/product/ark) - Doubao Seed-Code
+- Original multi-model CCM project by [@foreveryh](https://github.com/foreveryh)
+- Claude Code by Anthropic
+- Community contributors
 
----
+## 📞 Support
 
-⭐ If this project helps you, please give it a Star!
+- GitHub Issues: https://github.com/irvingpop/claude-code-switch/issues
+- Documentation: https://github.com/irvingpop/claude-code-switch
 
-📧 Questions or suggestions? Feel free to submit an [Issue](https://github.com/foreveryh/claude-code-switch/issues)
+## 🗺️ Roadmap
+
+- [x] Claude-only model support
+- [x] Secure account management with Keychain
+- [x] Security hardening
+- [x] Oh-my-zsh plugin support
+- [ ] Bash completion
+- [ ] Zsh completion
+- [ ] Account import/export
+- [ ] Token expiration warnings

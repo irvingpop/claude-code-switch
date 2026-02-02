@@ -4,61 +4,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Claude Code Model Switcher (CCM)** is a utility for developers to quickly switch between multiple AI service providers and models in Claude Code IDE. It's a pure Bash implementation (~970 lines) that provides intelligent fallback mechanisms between official APIs and PPINFRA backup service.
+**Claude Code Account Manager (CCM)** is a secure account manager for Claude Code with multi-model support. Pure Bash implementation (523 lines) focused on Claude models with macOS Keychain integration and security hardening.
 
-**Supported Providers:** Anthropic Claude, DeepSeek, Moonshot KIMI, Zhipu GLM, Alibaba Qwen, MeiTuan LongCat
+**Supported Models:** Claude Sonnet 4.5, Claude Opus 4.5, Claude Haiku 4.5
 
 ## Repository Structure
 
 ```
 Claude-Code-Switch/
-├── ccm.sh              # Core script (~970 lines) - Main implementation
+├── ccm.sh              # Core script (523 lines) - Main implementation
 ├── install.sh          # Installer - Sets up shell functions
 ├── uninstall.sh        # Uninstaller - Removes shell functions
-├── ccm                 # Wrapper script - Delegates to ccm.sh
 ├── ccc                 # Launcher script - One-command launcher for Claude Code
-├── test_install.sh     # Installation test script
-├── lang/               # Multi-language support (en.json, zh.json)
-├── docs/               # Internal documentation
-└── README.md / README_CN.md / TROUBLESHOOTING.md / CHANGELOG.md
+├── claudecode.plugin.zsh  # Oh-my-zsh plugin
+├── lang/               # English translations only (en.json)
+└── README.md / REFACTORING_SUMMARY.md
 ```
 
 ## Key Architecture & Design Patterns
 
-### 1. **Command Structure: Two Deployment Models**
+### 1. **Installation Methods**
 
-- **Direct execution:** `./ccc deepseek` / `./ccm deepseek` (no installation)
-- **Installed functions:** `ccc deepseek` / `ccm deepseek` (after `./install.sh`)
+- **Direct execution:** `./ccc sonnet` / `./ccm sonnet` (no installation)
+- **Standalone install:** `./install.sh` injects functions into `~/.zshrc` or `~/.bashrc`
+- **Oh-My-Zsh plugin:** Clone to `~/.oh-my-zsh/custom/plugins/claudecode`
   - Installer copies `ccm.sh` and `lang/` to `${XDG_DATA_HOME:-$HOME/.local/share}/ccm`
-  - Injects shell functions into `~/.zshrc` or `~/.bashrc`
   - Idempotent: safe to run multiple times
 
-### 2. **Smart Configuration Hierarchy**
+### 2. **Configuration (Simplified)**
 
-Priority order for configuration values:
-1. Environment variables (e.g., `DEEPSEEK_API_KEY`)
-2. `~/.ccm_config` file (created on first run)
-3. Built-in defaults (e.g., experience keys, zero-config support)
+Config file (`~/.ccm_config`) contains only model overrides:
+- `SONNET_MODEL` - Default: claude-sonnet-4-5-20250929
+- `OPUS_MODEL` - Default: claude-opus-4-5-20251101
+- `HAIKU_MODEL` - Default: claude-haiku-4-5
 
-Key function: `is_effectively_set()` checks if value is valid (not placeholder like "sk-your-...").
+Authentication via `ANTHROPIC_AUTH_TOKEN` environment variable (not stored in config).
 
-### 3. **Fallback Mechanism**
+### 3. **Account Management**
 
-Each model follows this pattern:
-- Check for official API key in env var → use official API
-- If missing, fall back to PPINFRA service (if available)
-- Special handling: DeepSeek has experience key for zero-config PPINFRA access
+- Accounts stored in `~/.ccm_accounts` (metadata only: name|timestamp)
+- Credentials stored in macOS Keychain via `security` command
+- Service name: `Claude Code-credentials`, account format: `ccm-{name}`
 
-### 4. **Environment Setup Pattern**
+### 4. **Model Switching**
 
-`emit_env_exports()` function outputs export statements that are `eval`'d to set variables:
+Model switching functions export environment variables directly:
 ```bash
-export ANTHROPIC_BASE_URL=...
-export ANTHROPIC_AUTH_TOKEN=...
 export ANTHROPIC_MODEL=...
 export ANTHROPIC_SMALL_FAST_MODEL=...
-export API_TIMEOUT_MS=600000  # Longer timeout for fallbacks
 ```
+Use `source <(ccm model)` to apply to current shell (avoids shell history exposure).
 
 ## Common Commands & Workflows
 
@@ -70,58 +65,50 @@ chmod +x install.sh ccm.sh
 ./install.sh
 source ~/.zshrc
 
-# Uninstall
-./uninstall.sh
+# Or use as oh-my-zsh plugin
+git clone ... ~/.oh-my-zsh/custom/plugins/claudecode
+# Add "claudecode" to plugins=() in ~/.zshrc
 ```
 
 ### Model Switching Workflows
 
 ```bash
-# Method 1: One-command launcher
-ccc deepseek              # Launch Claude Code with DeepSeek immediately
-
-# Method 2: Switch in current shell
-ccm deepseek              # Output export statements
-eval "$(ccm deepseek)"    # Apply to current shell
-
-# Method 3: Direct execution (no install)
-./ccc deepseek
-./ccm deepseek
+ccm sonnet                # Switch to Sonnet in current shell
+ccm opus work             # Switch to Opus with 'work' account
+ccc opus:work             # Switch and launch Claude Code
 ```
 
 ### Model Shortcuts
 
 ```bash
-ccm deepseek / ccm ds    # DeepSeek
-ccm kimi / ccm kimi2     # KIMI2
-ccm glm / ccm glm4       # GLM
-ccm qwen                 # Qwen
-ccm longcat / ccm lc     # LongCat
-ccm claude / ccm sonnet  # Claude Sonnet
-ccm opus / ccm o         # Claude Opus
-ccm haiku / ccm h        # Claude Haiku
+ccm sonnet / ccm s       # Claude Sonnet 4.5
+ccm opus / ccm o         # Claude Opus 4.5
+ccm haiku / ccm h        # Claude Haiku 4.5
 ```
 
-### Management Commands
+### Account Management Commands
 
 ```bash
-ccm status / ccm st      # Show current config (tokens masked)
-ccm help / ccm -h        # Show help
-ccm config / ccm cfg     # Edit configuration in editor
-ccm env <model>          # Output env exports only (no launcher)
-ccm pp <model>           # Switch to PPINFRA version of model
+ccm save-account <name>       # Save current token to Keychain
+ccm switch-account <name>     # Load token from Keychain
+ccm list-accounts             # List saved accounts
+ccm delete-account <name>     # Delete account metadata
+ccm current-account           # Show active account
+ccm status / ccm st           # Show config (tokens masked)
+ccm help / ccm -h             # Show help
 ```
 
 ### Testing & Verification
 
 ```bash
-# Test installation
-./test_install.sh
-
 # Verify setup
 ccm status               # Check current configuration
-echo $ANTHROPIC_BASE_URL # Verify env var set correctly
+echo $ANTHROPIC_MODEL    # Verify model set correctly
 cat ~/.ccm_config        # View config file
+
+# Syntax check
+bash -n ccm.sh           # Validate syntax
+shellcheck ccm.sh        # Lint with shellcheck
 ```
 
 ## Development Workflow
@@ -130,106 +117,68 @@ cat ~/.ccm_config        # View config file
 
 Key functions and their line ranges (approximately):
 - `load_translations()` - Load i18n from JSON
-- `load_config()` - Load env vars + config file
-- `is_effectively_set()` - Validate config values
+- `load_config()` - Load model overrides from config file
+- `sanitize_account_name()` - Validate account names (alphanumeric + hyphen/underscore, max 64 chars)
 - `mask_token()` - Mask secrets for status output
-- `switch_to_*()` - Model-specific functions (deepseek, kimi, glm, qwen, longcat, claude, opus, haiku)
-- `switch_to_ppinfra()` - PPINFRA service routing
+- `switch_to_claude()`, `switch_to_opus()`, `switch_to_haiku()` - Model switching (exports env vars)
+- `save_account()`, `switch_account()`, `list_accounts()`, `delete_account()`, `current_account()` - Account management
+- `read_keychain_credentials()`, `write_keychain_credentials()` - macOS Keychain integration
 - `show_status()` - Display masked configuration
 - `show_help()` - Display help information
-- `edit_config()` - Open config in editor (cursor/code/vim/nano)
-- `emit_env_exports()` - Generate export statements
 - `main()` - Entry point with argument parsing
 
-### Adding a New Model
+### Security Patterns
 
-Steps to add a new model (e.g., "newmodel"):
-1. Add to `switch_to_newmodel()` function in `ccm.sh`
-2. Add translations to `lang/en.json` and `lang/zh.json`
-3. Handle in `main()` function's case statement
-4. Add config template entries to config file generation
-5. Document in README.md with example usage
-6. Update CHANGELOG.md
+- **File permissions:** All config files created with `umask 077` and `chmod 600`
+- **Input validation:** `sanitize_account_name()` - only `[a-zA-Z0-9_-]`, max 64 chars
+- **Temp files:** `mktemp_secure()` creates with 600 perms and trap cleanup
+- **Shell history:** Use `source <(ccm cmd)` not `eval "$(ccm cmd)"` to avoid credential exposure
+- **Token masking:** Only show first 4 + last 4 characters in output
 
-### Configuration File Template
+### Bash Compatibility Notes
 
-Location: `~/.ccm_config`
-- Created automatically on first run
-- Contains API key placeholders and model overrides
-- Environment variables override config file values
-- Recommended permissions: `chmod 600 ~/.ccm_config`
+- **Bash 3.x (macOS default):** No associative arrays - use `TRANS_*` prefix with eval
+- **set -euo pipefail:** Requires `|| true` for commands that may fail (grep with no match)
+- **SC2155 warning:** Separate declare and assign: `local var; var=$(cmd)` not `local var=$(cmd)`
+- **Trap quoting:** Use single quotes: `trap 'cmd' EXIT` not `trap "cmd" EXIT`
 
 ## Supported Models & API Endpoints
 
 | Model | Official API | PPINFRA Alt | Base URL |
 |-------|-------------|-------------|----------|
 | Claude Sonnet 4.5 | claude-sonnet-4-5-20250929 | N/A | Anthropic default |
-| Claude Opus 4.1 | claude-opus-4-1-20250805 | N/A | Anthropic default |
+| Claude Opus 4.5 | claude-opus-4-5-20251101 | N/A | Anthropic default |
 | Claude Haiku 4.5 | claude-haiku-4-5 | N/A | Anthropic default |
-| DeepSeek | deepseek-chat | deepseek/deepseek-v3.2-exp | https://api.deepseek.com/anthropic |
-| KIMI2 | kimi-k2-turbo-preview | kimi-k2-turbo-preview | https://api.moonshot.cn/anthropic |
-| GLM | glm-4.6 | zai-org/glm-4.6 | https://open.bigmodel.cn/api/anthropic |
-| Qwen | qwen3-max | qwen3-next-80b-a3b-thinking | https://dashscope.aliyuncs.com/... |
-| LongCat | LongCat-Flash-Thinking | N/A | https://api.longcat.chat/anthropic |
 
-## Current Development
+## Version History
 
-**Current Branch:** `feat/haiku-4-5`
-**Latest:** Added Claude Haiku 4.5 support (v2.1.0, Oct 17)
-- Model: `claude-haiku-4-5`
-- Shortcuts: `ccm haiku` or `ccm h`
-- Config overrides: `HAIKU_MODEL`, `HAIKU_SMALL_FAST_MODEL`
-
-## Important Implementation Details
-
-### Multi-Language Support
-
-- Language files: `lang/en.json` (66 translation keys) and `lang/zh.json`
-- Loaded dynamically based on system locale via `load_translations()`
-- Falls back to English if translation missing
-- Language override: Set `CCM_LANGUAGE=en` or `CCM_LANGUAGE=zh`
-
-### Zero-Config Support
-
-- Built-in DeepSeek 3.1 experience key for PPINFRA service
-- Allows immediate testing without API key configuration
-- Located in `ccm.sh` - allows `ccm pp deepseek` to work out-of-box
-
-### Security Notes
-
-- Token masking: Status output shows only first 4 + last 4 characters
-- Full tokens never printed in plaintext
-- Config file should be readable only by user: `chmod 600 ~/.ccm_config`
-- Environment variables take precedence over config file (better for CI/CD)
-
-### Special Integration: Qwen/DashScope
-
-- Uses Alibaba Cloud endpoint: `https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy`
-- No custom routing needed - directly uses DashScope API
+- **v3.0.0** (Feb 2026) - Refactored to Claude-only, security hardened, 69.5% code reduction
+- **v2.x** - Multi-model support with PPINFRA fallback (deprecated)
 
 ## Debugging Tips
 
 ```bash
-# Check version and script location
-type ccm                  # Show function/script path
-head -10 ccm.sh          # Check version comment
+# Verify installation
+type ccm                      # Show function/script path
+wc -l ccm.sh                  # Should be ~523 lines
 
 # Trace execution
-bash -x ./ccm deepseek   # Run with debug output
+bash -x ./ccm.sh sonnet       # Run with debug output
 
 # Verify environment
-ccm status               # Show masked config
-cat ~/.ccm_config        # View config file
-env | grep ANTHROPIC     # Check all ANTHROPIC_* vars
+ccm status                    # Show masked config
+cat ~/.ccm_config             # View config file (should be 3 lines)
+cat ~/.ccm_accounts           # View account metadata
+env | grep ANTHROPIC          # Check ANTHROPIC_* vars
 
-# Test without launching Claude Code
-ccm env deepseek         # Output exports only, don't launch
-eval "$(ccm env deepseek)" && env | grep ANTHROPIC
+# Verify Keychain
+security find-generic-password -s "Claude Code-credentials" -a "ccm-work"
+
+# Check file permissions (should be 600)
+ls -la ~/.ccm_config ~/.ccm_accounts
 ```
 
 ## Documentation References
 
-- **User Guide:** README.md (16.5KB) / README_CN.md
-- **Troubleshooting:** TROUBLESHOOTING.md (7.3KB)
-- **PPINFRA Guide:** PPINFRA_USAGE.md (4.7KB)
-- **Version History:** CHANGELOG.md
+- **User Guide:** README.md
+- **Refactoring Notes:** REFACTORING_SUMMARY.md
