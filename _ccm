@@ -1,0 +1,53 @@
+#compdef ccm
+
+_ccm_accounts() {
+  local accounts
+  if [[ -f ~/.ccm_accounts ]]; then
+    accounts=(${(f)"$(cut -d'|' -f1 ~/.ccm_accounts 2>/dev/null)"})
+    _describe 'account' accounts
+  fi
+}
+
+_ccm() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1: :->command' \
+    '2: :->argument'
+
+  case $state in
+    command)
+      local -a commands
+      commands=(
+        'sonnet:Switch to Claude Sonnet 4.5'
+        's:Switch to Claude Sonnet 4.5 (alias)'
+        'opus:Switch to Claude Opus 4.5'
+        'o:Switch to Claude Opus 4.5 (alias)'
+        'haiku:Switch to Claude Haiku 4.5'
+        'h:Switch to Claude Haiku 4.5 (alias)'
+        'save-account:Save current ANTHROPIC_AUTH_TOKEN as named account'
+        'switch-account:Switch to a saved account'
+        'list-accounts:List all saved accounts'
+        'delete-account:Delete a saved account'
+        'current-account:Show currently active account'
+        'status:Show current configuration'
+        'st:Show current configuration (alias)'
+        'help:Show help message'
+      )
+      _describe 'command' commands
+      ;;
+    argument)
+      case ${words[2]} in
+        switch-account|delete-account)
+          _ccm_accounts
+          ;;
+        sonnet|s|opus|o|haiku|h)
+          _ccm_accounts
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_ccm "$@"
