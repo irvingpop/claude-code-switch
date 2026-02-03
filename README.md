@@ -7,25 +7,6 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS-blue.svg)](https://github.com/irvingpop/claude-code-switch)
 [![Security](https://img.shields.io/badge/Security-Hardened-green.svg)](https://github.com/irvingpop/claude-code-switch)
 
-## 🎯 Quick Start
-
-Install and start using Claude Code Account Manager in 3 steps:
-
-```bash
-# 1. Clone and install
-git clone https://github.com/irvingpop/claude-code-switch.git
-cd claude-code-switch
-./install.sh
-
-# 2. Reload shell
-source ~/.zshrc  # or source ~/.bashrc for bash
-
-# 3. Use it!
-ccm sonnet                  # Switch to Sonnet model
-ccm save-account work       # Save your current token as 'work'
-ccm opus work               # Switch to Opus using 'work' account
-```
-
 ## 🌟 Features
 
 - 🔐 **Secure Account Management**: Store multiple Claude Pro accounts securely in macOS Keychain
@@ -40,14 +21,6 @@ ccm opus work               # Switch to Opus using 'work' account
   - Token masking in status output
 - 🎨 **Clean Interface**: Color-coded output with clear status messages
 - 🔌 **Oh-My-Zsh Plugin**: Install as a zsh plugin or use standalone
-
-## 📦 Supported Models
-
-| Model | Model ID | Description |
-|-------|----------|-------------|
-| 🧠 **Sonnet 4.5** | claude-sonnet-4-5-20250929 | Balanced performance (default) |
-| 🚀 **Opus 4.5** | claude-opus-4-5-20251101 | Strongest reasoning capability |
-| 🔷 **Haiku 4.5** | claude-haiku-4-5 | Fast and efficient |
 
 ## 🛠️ Installation
 
@@ -103,26 +76,35 @@ ccm h                       # Haiku
 
 ### Account Management
 
-Manage multiple Claude Pro accounts:
+Manage multiple Claude accounts (API tokens and OAuth):
 
 ```bash
-# Save current account
-export ANTHROPIC_AUTH_TOKEN=sk-ant-your-token-here
+# Save API token account (auto-detects token type)
+export ANTHROPIC_AUTH_TOKEN=sk-ant-api-your-token-here
 ccm save-account work       # Save as 'work' account
 
-# Switch between accounts
-ccm switch-account work     # Switch to 'work' account
-ccm switch-account personal # Switch to 'personal' account
+# Create OAuth account (for Claude.ai subscriptions)
+ccm save-account --oauth personal  # Runs 'claude setup-token' automatically
 
-# List all saved accounts
-ccm list-accounts
+# Switch between accounts (auto-detects type)
+ccm switch-account work     # Switch to 'work' account (API or OAuth)
+source <(ccm switch-account work)  # Apply to current shell
+
+# List all saved accounts (shows type indicators)
+ccm list-accounts           # Shows [API] and [OAuth] labels
 
 # Show current account
-ccm current-account
+ccm current-account         # Shows active account and token type
 
-# Delete an account
+# Delete an account (handles both types)
 ccm delete-account old-account
 ```
+
+**Token Types:**
+- **API tokens** (`sk-ant-api*`): Stored in macOS Keychain for maximum security
+- **OAuth tokens** (`sk-ant-oat01-*`): Stored securely with ~/.claude.json backup
+
+Account switching auto-detects token type and handles the appropriate authentication method.
 
 ### Combined Model + Account Switching
 
@@ -203,50 +185,6 @@ HAIKU_MODEL=claude-haiku-4-5
 CCM_KEYCHAIN_SERVICE="Claude Code-credentials"
 ```
 
-## 🔐 Security Features
-
-### Implemented Security Hardening
-
-1. **Secure File Permissions**
-   - All config files created with umask 077 and chmod 600
-   - Prevents unauthorized access to configuration data
-
-2. **Input Validation**
-   - Account names validated: alphanumeric, hyphens, underscores only
-   - Maximum 64 character length
-   - Prevents command injection and path traversal
-
-3. **No Credentials in Shell History**
-   - Uses `source <(ccm command)` instead of `eval "$(ccm command)"`
-   - Credentials never appear in shell history
-
-4. **Secure Temporary Files**
-   - Uses mktemp with secure permissions (600)
-   - Automatic cleanup with trap handlers
-
-5. **Token Masking**
-   - Status output shows only first 4 + last 4 characters
-   - Full tokens never printed to terminal
-
-6. **Keychain Integration**
-   - Credentials stored in macOS Keychain, not config files
-   - Leverages OS-level encryption and access control
-
-### Security Best Practices
-
-```bash
-# Verify config file permissions
-ls -la ~/.ccm_config        # Should show -rw------- (600)
-ls -la ~/.ccm_accounts      # Should show -rw------- (600)
-
-# Manual keychain operations (if needed)
-# List CCM keychain entries
-security find-generic-password -s "Claude Code-credentials" -a "ccm-work"
-
-# Delete keychain entry manually
-security delete-generic-password -s "Claude Code-credentials" -a "ccm-work"
-```
-
 ## 🎯 Common Workflows
 
 ### Daily Development Workflow
@@ -315,11 +253,12 @@ ccc :work                  # Uses default model (Sonnet)
 
 | Command | Description |
 |---------|-------------|
-| `ccm save-account <name>` | Save current ANTHROPIC_AUTH_TOKEN as named account |
-| `ccm switch-account <name>` | Switch to a saved account |
-| `ccm list-accounts` | List all saved accounts |
-| `ccm delete-account <name>` | Delete a saved account |
-| `ccm current-account` | Show currently active account |
+| `ccm save-account <name>` | Save current ANTHROPIC_AUTH_TOKEN as named account (auto-detects API/OAuth) |
+| `ccm save-account --oauth <name>` | Create OAuth account (runs `claude setup-token` automatically) |
+| `ccm switch-account <name>` | Switch to a saved account (auto-detects type) |
+| `ccm list-accounts` | List all saved accounts (shows [API] and [OAuth] labels) |
+| `ccm delete-account <name>` | Delete a saved account (handles both API and OAuth) |
+| `ccm current-account` | Show currently active account with token type |
 
 ### Info Commands
 
@@ -336,7 +275,7 @@ ccc :work                  # Uses default model (Sonnet)
 | `ccc <account>` | Switch account and launch Claude Code |
 | `ccc <model>:<account>` | Switch both and launch Claude Code |
 
-## 🔄 Migration from v2.x
+### Migration from v2.x
 
 If you're upgrading from the multi-model version (v2.x):
 

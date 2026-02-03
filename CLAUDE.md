@@ -40,11 +40,14 @@ Config file (`~/.ccm_config`) contains only model overrides:
 
 Authentication via `ANTHROPIC_AUTH_TOKEN` environment variable (not stored in config).
 
-### 3. **Account Management**
+### 3. **Account Management (Unified API + OAuth)**
 
-- Accounts stored in `~/.ccm_accounts` (metadata only: name|timestamp)
-- Credentials stored in macOS Keychain via `security` command
-- Service name: `Claude Code-credentials`, account format: `ccm-{name}`
+- Accounts stored in `~/.ccm_accounts` (metadata format: name|type|timestamp|email)
+- **API tokens**: Stored in macOS Keychain via `security` command
+  - Service name: `Claude Code-credentials`, account format: `ccm-{name}`
+- **OAuth tokens**: Stored in `~/.ccm/oauth/{name}.token` with config backup
+- Auto-detection of token types (sk-ant-api* vs sk-ant-oat01-*)
+- Unified commands handle both API and OAuth accounts seamlessly
 
 ### 4. **Model Switching**
 
@@ -86,16 +89,17 @@ ccm opus / ccm o         # Claude Opus 4.5
 ccm haiku / ccm h        # Claude Haiku 4.5
 ```
 
-### Account Management Commands
+### Account Management Commands (Unified)
 
 ```bash
-ccm save-account <name>       # Save current token to Keychain
-ccm switch-account <name>     # Load token from Keychain
-ccm list-accounts             # List saved accounts
-ccm delete-account <name>     # Delete account metadata
-ccm current-account           # Show active account
-ccm status / ccm st           # Show config (tokens masked)
-ccm help / ccm -h             # Show help
+ccm save-account <name>          # Save current token (auto-detects API/OAuth)
+ccm save-account --oauth <name>  # Create OAuth account (runs claude setup-token)
+ccm switch-account <name>        # Switch to account (auto-routes by type)
+ccm list-accounts                # List all accounts (shows [API] / [OAuth] labels)
+ccm delete-account <name>        # Delete account (handles both types)
+ccm current-account              # Show active account with type
+ccm status / ccm st              # Show config (tokens masked)
+ccm help / ccm -h                # Show help
 ```
 
 ### Testing & Verification
@@ -152,6 +156,7 @@ Key functions and their line ranges (approximately):
 
 ## Version History
 
+- **v4.0.0** (Feb 2026) - Unified account management: OAuth integrated, auto-detection, single command interface
 - **v3.0.0** (Feb 2026) - Refactored to Claude-only, security hardened, 69.5% code reduction
 - **v2.x** - Multi-model support with PPINFRA fallback (deprecated)
 

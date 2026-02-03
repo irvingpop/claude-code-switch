@@ -10,27 +10,20 @@ usage() {
 Usage: ./ccc <model> [claude-options]
        ./ccc <account> [claude-options]
        ./ccc <model>:<account> [claude-options]
-       ./ccc oauth:<profile> [claude-options]
-       ./ccc <model>:oauth:<profile> [claude-options]
 
 Examples:
   ./ccc sonnet                          # Launch Claude Code with Sonnet
   ./ccc opus --dangerously-skip-permissions  # Pass options to Claude Code
   ./ccc work                            # Switch to 'work' account and launch
   ./ccc opus:work                       # Switch to 'work' account and use Opus
-
-OAuth Examples:
-  ./ccc oauth:personal                  # Switch to OAuth profile 'personal'
-  ./ccc opus:oauth:work                 # Switch to OAuth 'work' with Opus
+  ./ccc personal                        # Switch to 'personal' account (auto-detects type)
 
 Available models:
   sonnet, s           Claude Sonnet 4.5 (default)
   opus, o             Claude Opus 4.5
   haiku, h            Claude Haiku 4.5
-  <account>           Switch to saved account and use default model
+  <account>           Switch to saved account (API or OAuth) and use default model
   <model>:<account>   Switch to saved account and use specified model
-  oauth:<profile>     Switch to OAuth profile and launch
-  <model>:oauth:<profile>  Switch to OAuth profile with specified model
 EOF
 }
 
@@ -78,21 +71,7 @@ switch_model() {
     esac
 }
 
-if [[ "$model" == oauth:* ]]; then
-    oauth_profile="${model#oauth:}"
-    if ! "$CCM" oauth-switch "$oauth_profile"; then
-        echo "Error: Failed to switch OAuth profile: $oauth_profile" >&2
-        exit 1
-    fi
-    switch_model "sonnet"
-elif [[ "$model" == *:oauth:* ]]; then
-    IFS=':' read -r model_part _ oauth_profile <<< "$model"
-    if ! "$CCM" oauth-switch "$oauth_profile"; then
-        echo "Error: Failed to switch OAuth profile: $oauth_profile" >&2
-        exit 1
-    fi
-    switch_model "$model_part"
-elif [[ "$model" != *:* ]] && ! is_known_model "$model" && [[ ! "$model" =~ ^- ]]; then
+if [[ "$model" != *:* ]] && ! is_known_model "$model" && [[ ! "$model" =~ ^- ]]; then
     account="$model"
     if ! "$CCM" switch-account "$account"; then
         echo "Error: Failed to switch account: $account" >&2

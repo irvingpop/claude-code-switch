@@ -8,15 +8,6 @@ _ccc_accounts() {
   fi
 }
 
-_ccc_oauth_profiles() {
-  local profiles
-  local oauth_dir="${HOME}/.ccm/oauth"
-  if [[ -d "$oauth_dir" ]]; then
-    profiles=(${(f)"$(ls "$oauth_dir"/*.token 2>/dev/null | xargs -n1 basename | sed 's/\.token$//')"})
-    _describe 'oauth-profile' profiles
-  fi
-}
-
 _ccc() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
@@ -27,7 +18,7 @@ _ccc() {
 
   case $state in
     model_or_account)
-      local -a models accounts oauth_profiles combined model_oauth model_accounts
+      local -a models accounts combined
       models=(
         'sonnet:Claude Sonnet 4.5'
         's:Claude Sonnet 4.5 (alias)'
@@ -37,36 +28,6 @@ _ccc() {
         'h:Claude Haiku 4.5 (alias)'
       )
 
-      # Check if we're completing after "oauth:"
-      if [[ "$words[CURRENT]" == oauth:* ]]; then
-        local prefix="oauth:"
-        local oauth_dir="${HOME}/.ccm/oauth"
-        if [[ -d "$oauth_dir" ]]; then
-          oauth_profiles=(${(f)"$(ls "$oauth_dir"/*.token 2>/dev/null | xargs -n1 basename | sed 's/\.token$//')"})
-          local -a oauth_completions
-          for prof in $oauth_profiles; do
-            oauth_completions+=("oauth:${prof}:Switch to OAuth profile '${prof}'")
-          done
-          _describe 'oauth profile' oauth_completions
-        fi
-        return
-      fi
-
-      # Check if we're completing after "model:oauth:"
-      if [[ "$words[CURRENT]" == *:oauth:* ]]; then
-        local model_part="${words[CURRENT]%%:oauth:*}"
-        local oauth_dir="${HOME}/.ccm/oauth"
-        if [[ -d "$oauth_dir" ]]; then
-          oauth_profiles=(${(f)"$(ls "$oauth_dir"/*.token 2>/dev/null | xargs -n1 basename | sed 's/\.token$//')"})
-          local -a oauth_completions
-          for prof in $oauth_profiles; do
-            oauth_completions+=("${model_part}:oauth:${prof}:${model_part} model with OAuth profile '${prof}'")
-          done
-          _describe 'model with oauth profile' oauth_completions
-        fi
-        return
-      fi
-
       # Check if we're completing after "model:"
       if [[ "$words[CURRENT]" == sonnet:* || "$words[CURRENT]" == s:* || \
             "$words[CURRENT]" == opus:* || "$words[CURRENT]" == o:* || \
@@ -74,35 +35,29 @@ _ccc() {
         local model_part="${words[CURRENT]%%:*}"
         local -a model_completions
 
-        # Add accounts
+        # Add accounts (both API and OAuth)
         if [[ -f ~/.ccm_accounts ]]; then
           accounts=(${(f)"$(cut -d'|' -f1 ~/.ccm_accounts 2>/dev/null)"})
           for acc in $accounts; do
-            model_completions+=("${model_part}:${acc}:${model_part} with account '${acc}'")
+            model_completions+=("${model_part}:${acc}:${model_part} with account '${acc}' (auto-detects type)")
           done
         fi
 
-        # Add oauth: prefix
-        model_completions+=("${model_part}:oauth\::${model_part} with OAuth profile")
-
-        _describe 'model with account or oauth' model_completions
+        _describe 'model with account' model_completions
         return
       fi
 
-      # Default: show models, accounts, and oauth: prefix
+      # Default: show models and all accounts (API and OAuth)
       combined=($models)
 
       if [[ -f ~/.ccm_accounts ]]; then
         accounts=(${(f)"$(cut -d'|' -f1 ~/.ccm_accounts 2>/dev/null)"})
         for acc in $accounts; do
-          combined+=("$acc:Switch to account '$acc'")
+          combined+=("$acc:Switch to account '$acc' (auto-detects type)")
         done
       fi
 
-      # Add oauth: prefix
-      combined+=('oauth\::Switch to OAuth profile')
-
-      _describe 'model, account, or oauth' combined
+      _describe 'model or account' combined
       ;;
     args)
       _arguments '*: :_files'

@@ -101,6 +101,26 @@ sanitize_account_name() {
     echo "$name"
 }
 
+detect_token_type() {
+    local token="$1"
+
+    # OAuth token pattern: sk-ant-oat01-*
+    if [[ "$token" =~ ^sk-ant-oat01- ]]; then
+        echo "oauth"
+        return 0
+    fi
+
+    # API token patterns: sk-ant-api*, sk-ant-sid*, or legacy sk-ant-*
+    if [[ "$token" =~ ^sk-ant-(api|sid).*- ]] || [[ "$token" =~ ^sk-ant-[^o] ]]; then
+        echo "api"
+        return 0
+    fi
+
+    # Default to API for unknown patterns
+    echo "api"
+    return 1
+}
+
 validate_model_name() {
     local model="$1"
     case "$model" in
@@ -145,6 +165,101 @@ EOF
         done < "$CONFIG_FILE"
         set -u
     fi
+}
+
+migrate_accounts_v4() {
+    local migration_marker="$CCM_DIR/.migrated_v4"
+
+    # Already migrated, skip
+    if [[ -f "$migration_marker" ]]; then
+        return 0
+    fi
+
+    ensure_ccm_dirs
+
+    # Backup old accounts file if it exists
+    if [[ -f "$ACCOUNTS_FILE" ]]; then
+        cp "$ACCOUNTS_FILE" "$ACCOUNTS_FILE.backup" 2>/dev/null || true
+
+        local temp_file
+        temp_file=$(mktemp_secure) || return 1
+
+        # Migrate existing accounts to new 4-field format
+        while IFS='|' read -r account_name timestamp rest; do
+            [[ -z "$account_name" ]] && continue
+
+            # Skip if already in new format (has 3+ fields)
+            if [[ -n "$rest" ]]; then
+                echo "$account_name|$timestamp|$rest" >> "$temp_file"
+                continue
+            fi
+
+            # Try to detect token type
+            local token_type="api"
+            local email=""
+
+            # Try reading from Keychain (API tokens)
+            local token
+            token=$(read_keychain_credentials "$account_name" 2>/dev/null || true)
+
+            if [[ -n "$token" ]]; then
+                token_type=$(detect_token_type "$token")
+            elif [[ -f "$CCM_OAUTH_DIR/${account_name}.token" ]]; then
+                # Check OAuth directory
+                token=$(cat "$CCM_OAUTH_DIR/${account_name}.token" 2>/dev/null || true)
+                if [[ -n "$token" ]]; then
+                    token_type=$(detect_token_type "$token")
+                fi
+
+                # Read email if available
+                if [[ -f "$CCM_OAUTH_DIR/${account_name}.email" ]]; then
+                    email=$(cat "$CCM_OAUTH_DIR/${account_name}.email" 2>/dev/null || true)
+                fi
+            fi
+
+            # Write in new format
+            echo "$account_name|$token_type|$timestamp|$email" >> "$temp_file"
+        done < "$ACCOUNTS_FILE"
+
+        # Replace old file with migrated version
+        mv "$temp_file" "$ACCOUNTS_FILE"
+        chmod 600 "$ACCOUNTS_FILE"
+    fi
+
+    # Scan OAuth directory for profiles not in accounts file
+    if [[ -d "$CCM_OAUTH_DIR" ]]; then
+        for token_file in "$CCM_OAUTH_DIR"/*.token; do
+            [[ -f "$token_file" ]] || continue
+
+            local profile_name
+            profile_name=$(basename "$token_file" .token)
+
+            # Skip if already in accounts file
+            if [[ -f "$ACCOUNTS_FILE" ]] && grep -q "^${profile_name}|" "$ACCOUNTS_FILE" 2>/dev/null; then
+                continue
+            fi
+
+            # Add to accounts file
+            local email=""
+            local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
+            if [[ -f "$email_file" ]]; then
+                email=$(cat "$email_file" 2>/dev/null || true)
+            fi
+
+            local timestamp
+            timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            local old_umask
+            old_umask=$(umask)
+            umask 077
+            echo "$profile_name|oauth|$timestamp|$email" >> "$ACCOUNTS_FILE"
+            umask "$old_umask"
+        done
+    fi
+
+    # Create migration marker
+    touch "$migration_marker"
+    echo "$(t 'success_migration_complete' 'Account data migrated to unified format')" >&2
 }
 
 mask_token() {
@@ -201,46 +316,187 @@ write_keychain_credentials() {
 save_account() {
     set_no_color
 
+    # Check for --oauth flag
+    local oauth_mode=false
+    local account_name=""
+
+    if [[ "$1" == "--oauth" ]]; then
+        oauth_mode=true
+        shift
+    fi
+
     if [[ $# -lt 1 ]]; then
         echo "$(t 'error_account_name_required' 'Error: Account name required')" >&2
-        echo "$(t 'usage_save_account' 'Usage: ccm save-account <name>')" >&2
+        echo "$(t 'usage_save_account' 'Usage: ccm save-account [--oauth] <name>')" >&2
         return 1
     fi
 
-    local account_name
     account_name=$(sanitize_account_name "$1") || return 1
 
-    local token="${ANTHROPIC_AUTH_TOKEN:-}"
+    # OAuth mode: generate token via claude setup-token
+    if [[ "$oauth_mode" == "true" ]]; then
+        if ! command -v claude >/dev/null 2>&1; then
+            echo -e "${RED}$(t 'error_claude_not_found' "Error: 'claude' CLI not found")${NC}" >&2
+            echo "$(t 'hint_install_claude' 'Install: npm install -g @anthropic-ai/claude-code')" >&2
+            return 1
+        fi
 
-    if [[ -z "$token" ]]; then
-        echo -e "${RED}$(t 'error_no_token' 'Error: ANTHROPIC_AUTH_TOKEN not set')${NC}"
-        echo "$(t 'hint_set_token' 'Set the token first with: export ANTHROPIC_AUTH_TOKEN=your_token')"
-        return 1
-    fi
+        if ! command -v jq >/dev/null 2>&1; then
+            echo -e "${RED}$(t 'error_jq_not_found' "Error: 'jq' not found")${NC}" >&2
+            echo "$(t 'hint_install_jq' 'Install: brew install jq')" >&2
+            return 1
+        fi
 
-    local old_umask
-    old_umask=$(umask)
-    umask 077
-    touch "$ACCOUNTS_FILE"
-    umask "$old_umask"
-    chmod 600 "$ACCOUNTS_FILE"
+        ensure_ccm_dirs
 
-    if grep -q "^$account_name|" "$ACCOUNTS_FILE" 2>/dev/null; then
-        echo -e "${YELLOW}$(t 'warn_account_exists' "Account '$account_name' already exists. Updating...")${NC}"
-        local temp_file
-        temp_file=$(mktemp_secure)
-        grep -v "^$account_name|" "$ACCOUNTS_FILE" > "$temp_file" || true
-        mv "$temp_file" "$ACCOUNTS_FILE"
-    fi
+        echo -e "${BLUE}$(t 'info_oauth_setup_token' 'Generating OAuth token from current Claude session...')${NC}"
+        echo "If you're not logged in to Claude, run 'claude' first to authenticate."
+        echo ""
 
-    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    echo "$account_name|$timestamp" >> "$ACCOUNTS_FILE"
+        local token_output
+        token_output=$(claude setup-token 2>&1)
 
-    if write_keychain_credentials "$account_name" "$token"; then
-        echo -e "${GREEN}$(t 'success_account_saved_keychain' "Account '$account_name' saved to Keychain")${NC}"
+        local token
+        token=$(echo "$token_output" | grep -o 'sk-ant-oat01-[^[:space:]]*' | tr -d '\n')
+
+        if [[ -z "$token" ]]; then
+            echo -e "${RED}$(t 'error_oauth_setup_token_failed' 'Failed to generate OAuth token')${NC}" >&2
+            echo "Make sure you're logged in to Claude. Run 'claude' to log in first." >&2
+            echo "Output was:" >&2
+            echo "$token_output" >&2
+            return 1
+        fi
+
+        # Save OAuth token to file
+        local token_file="$CCM_OAUTH_DIR/${account_name}.token"
+        local email_file="$CCM_OAUTH_DIR/${account_name}.email"
+        local config_file="$CCM_CONFIGS_DIR/${account_name}.claude.json"
+
+        local old_umask
+        old_umask=$(umask)
+        umask 077
+        echo "$token" > "$token_file"
+        chmod 600 "$token_file"
+        umask "$old_umask"
+
+        # Extract email from ~/.claude.json
+        local email=""
+        local claude_json="$HOME/.claude.json"
+        if [[ -f "$claude_json" ]]; then
+            email=$(jq -r '.oauthAccount.emailAddress // empty' "$claude_json" 2>/dev/null || true)
+            if [[ -n "$email" ]]; then
+                echo "$email" > "$email_file"
+                chmod 600 "$email_file"
+            fi
+
+            # Backup claude config
+            cp "$claude_json" "$config_file"
+            chmod 600 "$config_file"
+        fi
+
+        # Save metadata to accounts file
+        local timestamp
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        local old_umask
+        old_umask=$(umask)
+        umask 077
+        touch "$ACCOUNTS_FILE"
+        umask "$old_umask"
+        chmod 600 "$ACCOUNTS_FILE"
+
+        if grep -q "^$account_name|" "$ACCOUNTS_FILE" 2>/dev/null; then
+            local temp_file
+            temp_file=$(mktemp_secure)
+            grep -v "^$account_name|" "$ACCOUNTS_FILE" > "$temp_file" || true
+            mv "$temp_file" "$ACCOUNTS_FILE"
+        fi
+
+        echo "$account_name|oauth|$timestamp|$email" >> "$ACCOUNTS_FILE"
+
+        echo ""
+        echo -e "${GREEN}$(t 'success_oauth_created' "OAuth account '$account_name' saved")${NC}"
+        if [[ -n "$email" ]]; then
+            echo "$(t 'label_email' 'Email'): $email"
+        fi
+        echo ""
+        echo "To activate this account, run:"
+        echo "  source <(ccm switch-account $account_name)"
+
     else
-        echo -e "${RED}$(t 'error_keychain_failed' 'Failed to save to Keychain')${NC}"
-        return 1
+        # Regular mode: auto-detect token type
+        local token="${ANTHROPIC_AUTH_TOKEN:-}"
+
+        if [[ -z "$token" ]]; then
+            echo -e "${RED}$(t 'error_no_token' 'Error: ANTHROPIC_AUTH_TOKEN not set')${NC}"
+            echo "$(t 'hint_set_token' 'Set the token first with: export ANTHROPIC_AUTH_TOKEN=your_token')"
+            echo "For OAuth accounts, use: ccm save-account --oauth <name>"
+            return 1
+        fi
+
+        # Auto-detect token type
+        local token_type
+        token_type=$(detect_token_type "$token")
+
+        local old_umask
+        old_umask=$(umask)
+        umask 077
+        touch "$ACCOUNTS_FILE"
+        umask "$old_umask"
+        chmod 600 "$ACCOUNTS_FILE"
+
+        if grep -q "^$account_name|" "$ACCOUNTS_FILE" 2>/dev/null; then
+            echo -e "${YELLOW}$(t 'warn_account_exists' "Account '$account_name' already exists. Updating...")${NC}"
+            local temp_file
+            temp_file=$(mktemp_secure)
+            grep -v "^$account_name|" "$ACCOUNTS_FILE" > "$temp_file" || true
+            mv "$temp_file" "$ACCOUNTS_FILE"
+        fi
+
+        local timestamp
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        if [[ "$token_type" == "oauth" ]]; then
+            # Save OAuth token to file
+            ensure_ccm_dirs
+
+            local token_file="$CCM_OAUTH_DIR/${account_name}.token"
+            echo "$token" > "$token_file"
+            chmod 600 "$token_file"
+
+            # Extract email if ~/.claude.json exists
+            local email=""
+            local claude_json="$HOME/.claude.json"
+            if [[ -f "$claude_json" ]] && command -v jq >/dev/null 2>&1; then
+                email=$(jq -r '.oauthAccount.emailAddress // empty' "$claude_json" 2>/dev/null || true)
+                if [[ -n "$email" ]]; then
+                    local email_file="$CCM_OAUTH_DIR/${account_name}.email"
+                    echo "$email" > "$email_file"
+                    chmod 600 "$email_file"
+                fi
+
+                # Backup config
+                local config_file="$CCM_CONFIGS_DIR/${account_name}.claude.json"
+                cp "$claude_json" "$config_file"
+                chmod 600 "$config_file"
+            fi
+
+            echo "$account_name|oauth|$timestamp|$email" >> "$ACCOUNTS_FILE"
+            echo -e "${GREEN}$(t 'success_account_saved' "OAuth account '$account_name' saved")${NC}"
+            if [[ -n "$email" ]]; then
+                echo "Email: $email"
+            fi
+        else
+            # Save API token to Keychain
+            echo "$account_name|api|$timestamp|" >> "$ACCOUNTS_FILE"
+
+            if write_keychain_credentials "$account_name" "$token"; then
+                echo -e "${GREEN}$(t 'success_account_saved_keychain' "API account '$account_name' saved to Keychain")${NC}"
+            else
+                echo -e "${RED}$(t 'error_keychain_failed' 'Failed to save to Keychain')${NC}"
+                return 1
+            fi
+        fi
     fi
 }
 
@@ -262,18 +518,70 @@ switch_account() {
         return 1
     fi
 
-    local token
-    token=$(read_keychain_credentials "$account_name")
+    # Read account metadata
+    local token_type="api"
+    local email=""
+    while IFS='|' read -r acc_name acc_type timestamp acc_email rest; do
+        if [[ "$acc_name" == "$account_name" ]]; then
+            token_type="${acc_type:-api}"
+            email="$acc_email"
+            break
+        fi
+    done < "$ACCOUNTS_FILE"
 
-    if [[ -z "$token" ]]; then
-        echo "Error: Failed to read credentials for '$account_name' from Keychain" >&2
-        return 1
+    # Route based on token type
+    if [[ "$token_type" == "oauth" ]]; then
+        # OAuth account: read from file and restore config
+        local token_file="$CCM_OAUTH_DIR/${account_name}.token"
+        local config_file="$CCM_CONFIGS_DIR/${account_name}.claude.json"
+
+        if [[ ! -f "$token_file" ]]; then
+            echo "Error: OAuth token file for '$account_name' not found" >&2
+            echo "Expected: $token_file" >&2
+            return 1
+        fi
+
+        local token
+        token=$(cat "$token_file")
+
+        if [[ -z "$token" ]]; then
+            echo "Error: Token file for '$account_name' is empty" >&2
+            return 1
+        fi
+
+        # Restore Claude config if available
+        if [[ -f "$config_file" ]]; then
+            cp "$config_file" "$HOME/.claude.json" 2>/dev/null
+            chmod 600 "$HOME/.claude.json" 2>/dev/null
+        fi
+
+        # Update active profile marker
+        echo "$account_name" > "$CCM_OAUTH_DIR/active"
+        chmod 600 "$CCM_OAUTH_DIR/active"
+
+        echo "Switched to OAuth account: $account_name" >&2
+        if [[ -n "$email" ]]; then
+            echo "Email: $email" >&2
+        fi
+        echo "CLAUDE_CODE_OAUTH_TOKEN has been set" >&2
+
+        echo "export CLAUDE_CODE_OAUTH_TOKEN=\"$token\""
+
+    else
+        # API account: read from Keychain
+        local token
+        token=$(read_keychain_credentials "$account_name")
+
+        if [[ -z "$token" ]]; then
+            echo "Error: Failed to read credentials for '$account_name' from Keychain" >&2
+            return 1
+        fi
+
+        echo "Switched to API account: $account_name" >&2
+        echo "ANTHROPIC_AUTH_TOKEN has been set" >&2
+
+        echo "export ANTHROPIC_AUTH_TOKEN=\"$token\""
     fi
-
-    echo "Switched to account: $account_name" >&2
-    echo "ANTHROPIC_AUTH_TOKEN has been set" >&2
-
-    echo "export ANTHROPIC_AUTH_TOKEN=\"$token\""
 }
 
 list_accounts() {
@@ -285,34 +593,75 @@ list_accounts() {
         return 0
     fi
 
-    local current_token="${ANTHROPIC_AUTH_TOKEN:-}"
+    local current_api_token="${ANTHROPIC_AUTH_TOKEN:-}"
+    local current_oauth_token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
     local count=0
+    local api_count=0
+    local oauth_count=0
 
     echo -e "${BLUE}$(t 'header_saved_accounts' 'Saved Accounts:')${NC}"
     echo "----------------------------------------"
 
-    while IFS='|' read -r account_name timestamp; do
+    while IFS='|' read -r account_name token_type timestamp email rest; do
         [[ -z "$account_name" ]] && continue
+
+        # Default to API if token_type is missing (old format)
+        token_type="${token_type:-api}"
 
         count=$((count + 1))
 
+        # Count by type
+        if [[ "$token_type" == "oauth" ]]; then
+            oauth_count=$((oauth_count + 1))
+        else
+            api_count=$((api_count + 1))
+        fi
+
+        # Determine if current/active
         local status=""
-        if [[ -n "$current_token" ]]; then
-            local stored_token
-            stored_token=$(read_keychain_credentials "$account_name" 2>/dev/null)
-            if [[ "$stored_token" == "$current_token" ]]; then
-                status=" ${GREEN}[current]${NC}"
+        if [[ "$token_type" == "oauth" ]]; then
+            # Check OAuth token
+            if [[ -n "$current_oauth_token" ]]; then
+                local stored_token
+                if [[ -f "$CCM_OAUTH_DIR/${account_name}.token" ]]; then
+                    stored_token=$(cat "$CCM_OAUTH_DIR/${account_name}.token" 2>/dev/null)
+                    if [[ "$stored_token" == "$current_oauth_token" ]]; then
+                        status=" ${GREEN}[active]${NC}"
+                    fi
+                fi
+            fi
+        else
+            # Check API token
+            if [[ -n "$current_api_token" ]]; then
+                local stored_token
+                stored_token=$(read_keychain_credentials "$account_name" 2>/dev/null)
+                if [[ "$stored_token" == "$current_api_token" ]]; then
+                    status=" ${GREEN}[current]${NC}"
+                fi
             fi
         fi
 
-        echo -e "${GREEN}$account_name${NC} ($(t 'label_saved' 'saved'): $timestamp)$status"
+        # Display account with type indicator
+        local type_label
+        if [[ "$token_type" == "oauth" ]]; then
+            type_label="${BLUE}[OAuth]${NC}"
+        else
+            type_label="${YELLOW}[API]${NC}"
+        fi
+
+        # Format output
+        if [[ "$token_type" == "oauth" && -n "$email" ]]; then
+            echo -e "${GREEN}$account_name${NC} $type_label ($email)$status"
+        else
+            echo -e "${GREEN}$account_name${NC} $type_label ($(t 'label_saved' 'saved'): $timestamp)$status"
+        fi
     done < "$ACCOUNTS_FILE"
 
     if [[ $count -eq 0 ]]; then
         echo "$(t 'info_no_accounts' 'No saved accounts found')"
     else
         echo "----------------------------------------"
-        echo "$(t 'info_total_accounts' "Total: $count account(s)")"
+        echo "$(t 'label_account_stats' "Total: $count account(s)") ($api_count API, $oauth_count OAuth)"
     fi
 }
 
@@ -333,318 +682,129 @@ delete_account() {
         return 1
     fi
 
+    # Read account metadata to determine token type
+    local token_type="api"
+    while IFS='|' read -r acc_name acc_type timestamp email rest; do
+        if [[ "$acc_name" == "$account_name" ]]; then
+            token_type="${acc_type:-api}"
+            break
+        fi
+    done < "$ACCOUNTS_FILE"
+
+    # Remove from accounts file
     local temp_file
     temp_file=$(mktemp_secure)
     grep -v "^$account_name|" "$ACCOUNTS_FILE" > "$temp_file" || true
     mv "$temp_file" "$ACCOUNTS_FILE"
 
-    echo -e "${GREEN}$(t 'success_account_deleted' "Account '$account_name' deleted from accounts file")${NC}"
-    echo -e "${YELLOW}$(t 'warn_keychain_manual' 'Note: Keychain entry must be deleted manually if needed')${NC}"
-    echo "$(t 'hint_keychain_delete' "Use: security delete-generic-password -s '$KEYCHAIN_SERVICE' -a 'ccm-$account_name'")"
+    # Route deletion based on token type
+    if [[ "$token_type" == "oauth" ]]; then
+        # Delete OAuth files
+        rm -f "$CCM_OAUTH_DIR/${account_name}.token" 2>/dev/null
+        rm -f "$CCM_OAUTH_DIR/${account_name}.email" 2>/dev/null
+        rm -f "$CCM_CONFIGS_DIR/${account_name}.claude.json" 2>/dev/null
+
+        # Clear active profile if deleting active
+        if [[ -f "$CCM_OAUTH_DIR/active" ]]; then
+            local active_profile
+            active_profile=$(cat "$CCM_OAUTH_DIR/active" 2>/dev/null || true)
+            if [[ "$active_profile" == "$account_name" ]]; then
+                rm -f "$CCM_OAUTH_DIR/active"
+            fi
+        fi
+
+        echo -e "${GREEN}$(t 'success_account_deleted' "OAuth account '$account_name' deleted")${NC}"
+    else
+        # Delete from Keychain
+        local keychain_account="ccm-${account_name}"
+        if security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$keychain_account" 2>/dev/null; then
+            echo -e "${GREEN}$(t 'success_account_deleted' "API account '$account_name' deleted")${NC}"
+            echo "Removed from Keychain"
+        else
+            echo -e "${GREEN}$(t 'success_account_deleted' "API account '$account_name' deleted from accounts file")${NC}"
+            echo -e "${YELLOW}Note: Keychain entry not found or already deleted${NC}"
+        fi
+    fi
 }
 
 current_account() {
     set_no_color
 
-    local current_token="${ANTHROPIC_AUTH_TOKEN:-}"
+    local current_api_token="${ANTHROPIC_AUTH_TOKEN:-}"
+    local current_oauth_token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 
-    if [[ -z "$current_token" ]]; then
-        echo "$(t 'info_no_active_account' 'No account currently active (ANTHROPIC_AUTH_TOKEN not set)')"
+    if [[ -z "$current_api_token" && -z "$current_oauth_token" ]]; then
+        echo "$(t 'info_no_active_account' 'No account currently active')"
+        echo "Environment variables not set: ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN"
         return 0
     fi
 
     if [[ ! -f "$ACCOUNTS_FILE" ]]; then
-        echo "$(t 'info_token_set_unknown' 'ANTHROPIC_AUTH_TOKEN is set, but no saved accounts found')"
-        echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_token")")"
+        if [[ -n "$current_api_token" ]]; then
+            echo "ANTHROPIC_AUTH_TOKEN is set, but no saved accounts found"
+            echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_api_token")")"
+        fi
+        if [[ -n "$current_oauth_token" ]]; then
+            echo "CLAUDE_CODE_OAUTH_TOKEN is set, but no saved accounts found"
+            echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_oauth_token")")"
+        fi
         return 0
     fi
 
     local found=false
-    while IFS='|' read -r account_name timestamp; do
+    while IFS='|' read -r account_name token_type timestamp email rest; do
         [[ -z "$account_name" ]] && continue
 
-        local stored_token
-        stored_token=$(read_keychain_credentials "$account_name" 2>/dev/null)
+        token_type="${token_type:-api}"
 
-        if [[ "$stored_token" == "$current_token" ]]; then
-            echo -e "${GREEN}$(t 'info_current_account' "Current account: $account_name")${NC}"
-            echo "$(t 'label_saved' 'Saved'): $timestamp"
-            echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_token")")"
-            found=true
-            break
+        if [[ "$token_type" == "oauth" ]]; then
+            # Check OAuth token
+            if [[ -n "$current_oauth_token" && -f "$CCM_OAUTH_DIR/${account_name}.token" ]]; then
+                local stored_token
+                stored_token=$(cat "$CCM_OAUTH_DIR/${account_name}.token" 2>/dev/null)
+
+                if [[ "$stored_token" == "$current_oauth_token" ]]; then
+                    echo -e "${GREEN}Current account: $account_name [OAuth]${NC}"
+                    echo "$(t 'label_saved' 'Saved'): $timestamp"
+                    if [[ -n "$email" ]]; then
+                        echo "$(t 'label_email' 'Email'): $email"
+                    fi
+                    echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_oauth_token")")"
+                    echo "Environment: CLAUDE_CODE_OAUTH_TOKEN"
+                    found=true
+                    break
+                fi
+            fi
+        else
+            # Check API token
+            if [[ -n "$current_api_token" ]]; then
+                local stored_token
+                stored_token=$(read_keychain_credentials "$account_name" 2>/dev/null)
+
+                if [[ "$stored_token" == "$current_api_token" ]]; then
+                    echo -e "${GREEN}Current account: $account_name [API]${NC}"
+                    echo "$(t 'label_saved' 'Saved'): $timestamp"
+                    echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_api_token")")"
+                    echo "Environment: ANTHROPIC_AUTH_TOKEN"
+                    found=true
+                    break
+                fi
+            fi
         fi
     done < "$ACCOUNTS_FILE"
 
     if [[ "$found" == "false" ]]; then
-        echo "$(t 'info_token_set_unknown' 'ANTHROPIC_AUTH_TOKEN is set, but does not match any saved account')"
-        echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_token")")"
+        if [[ -n "$current_api_token" ]]; then
+            echo "ANTHROPIC_AUTH_TOKEN is set, but does not match any saved account"
+            echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_api_token")")"
+        fi
+        if [[ -n "$current_oauth_token" ]]; then
+            echo "CLAUDE_CODE_OAUTH_TOKEN is set, but does not match any saved account"
+            echo "$(t 'hint_masked_token' "Token (masked): $(mask_token "$current_oauth_token")")"
+        fi
     fi
 }
 
-oauth_create() {
-    set_no_color
-
-    if [[ $# -lt 1 ]]; then
-        echo "$(t 'error_oauth_name_required' 'Error: OAuth profile name required')" >&2
-        echo "$(t 'usage_oauth_create' 'Usage: ccm oauth-create <name>')" >&2
-        return 1
-    fi
-
-    local profile_name
-    profile_name=$(sanitize_account_name "$1") || return 1
-
-    if ! command -v claude >/dev/null 2>&1; then
-        echo -e "${RED}$(t 'error_claude_not_found' "Error: 'claude' CLI not found")${NC}" >&2
-        echo "$(t 'hint_install_claude' 'Install: npm install -g @anthropic-ai/claude-code')" >&2
-        return 1
-    fi
-
-    if ! command -v jq >/dev/null 2>&1; then
-        echo -e "${RED}$(t 'error_jq_not_found' "Error: 'jq' not found")${NC}" >&2
-        echo "$(t 'hint_install_jq' 'Install: brew install jq')" >&2
-        return 1
-    fi
-
-    ensure_ccm_dirs
-
-    local token_file="$CCM_OAUTH_DIR/${profile_name}.token"
-    local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
-    local config_file="$CCM_CONFIGS_DIR/${profile_name}.claude.json"
-
-    if [[ -f "$token_file" ]]; then
-        echo -e "${YELLOW}$(t 'warn_oauth_profile_exists' "OAuth profile '$profile_name' already exists. Overwriting...")${NC}"
-    fi
-
-    echo -e "${BLUE}$(t 'info_oauth_setup_token' 'Generating OAuth token from current Claude session...')${NC}"
-    echo "If you're not logged in to Claude, run 'claude' first to authenticate."
-    echo ""
-
-    local token_output
-    token_output=$(claude setup-token 2>&1)
-
-    local token
-    token=$(echo "$token_output" | grep -o 'sk-ant-oat01-[^[:space:]]*' | tr -d '\n')
-
-    if [[ -z "$token" ]]; then
-        echo -e "${RED}$(t 'error_oauth_setup_token_failed' 'Failed to generate OAuth token')${NC}" >&2
-        echo "Make sure you're logged in to Claude. Run 'claude' to log in first." >&2
-        echo "Output was:" >&2
-        echo "$token_output" >&2
-        return 1
-    fi
-
-    local old_umask
-    old_umask=$(umask)
-    umask 077
-    echo "$token" > "$token_file"
-    chmod 600 "$token_file"
-    umask "$old_umask"
-
-    local claude_json="$HOME/.claude.json"
-    if [[ -f "$claude_json" ]]; then
-        local email
-        email=$(jq -r '.oauthAccount.emailAddress // empty' "$claude_json" 2>/dev/null || true)
-        if [[ -n "$email" ]]; then
-            echo "$email" > "$email_file"
-            chmod 600 "$email_file"
-        fi
-
-        cp "$claude_json" "$config_file"
-        chmod 600 "$config_file"
-    fi
-
-    echo "$profile_name" > "$CCM_OAUTH_DIR/active"
-    chmod 600 "$CCM_OAUTH_DIR/active"
-
-    echo ""
-    echo -e "${GREEN}$(t 'success_oauth_created' "OAuth profile '$profile_name' created successfully")${NC}"
-    if [[ -n "${email:-}" ]]; then
-        echo "$(t 'label_email' 'Email'): $email"
-    fi
-    echo ""
-    echo "To activate this profile, run:"
-    echo "  ccm oauth-switch $profile_name"
-}
-
-oauth_switch() {
-    set_no_color
-
-    if [[ $# -lt 1 ]]; then
-        echo "$(t 'error_oauth_name_required' 'Error: OAuth profile name required')" >&2
-        echo "$(t 'usage_oauth_switch' 'Usage: ccm oauth-switch <name>')" >&2
-        return 1
-    fi
-
-    local profile_name
-    profile_name=$(sanitize_account_name "$1") || return 1
-
-    local token_file="$CCM_OAUTH_DIR/${profile_name}.token"
-    local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
-    local config_file="$CCM_CONFIGS_DIR/${profile_name}.claude.json"
-
-    if [[ ! -f "$token_file" ]]; then
-        echo "Error: OAuth profile '$profile_name' not found" >&2
-        echo "Use: ccm oauth-list" >&2
-        return 1
-    fi
-
-    local token
-    token=$(cat "$token_file")
-
-    if [[ -z "$token" ]]; then
-        echo "Error: Token file for '$profile_name' is empty" >&2
-        return 1
-    fi
-
-    if [[ -f "$config_file" ]]; then
-        cp "$config_file" "$HOME/.claude.json" 2>/dev/null
-        chmod 600 "$HOME/.claude.json" 2>/dev/null
-    fi
-
-    echo "$profile_name" > "$CCM_OAUTH_DIR/active"
-    chmod 600 "$CCM_OAUTH_DIR/active"
-
-    local email=""
-    if [[ -f "$email_file" ]]; then
-        email=$(cat "$email_file")
-    fi
-
-    echo "Switched to OAuth profile: $profile_name" >&2
-    if [[ -n "$email" ]]; then
-        echo "Email: $email" >&2
-    fi
-    echo "CLAUDE_CODE_OAUTH_TOKEN has been set" >&2
-
-    echo "export CLAUDE_CODE_OAUTH_TOKEN=\"$token\""
-}
-
-oauth_list() {
-    set_no_color
-
-    if [[ ! -d "$CCM_OAUTH_DIR" ]]; then
-        echo "$(t 'info_no_oauth_profiles' 'No OAuth profiles found')"
-        echo "$(t 'hint_oauth_create' 'Use: ccm oauth-create <name>')"
-        return 0
-    fi
-
-    local active_profile=""
-    if [[ -f "$CCM_OAUTH_DIR/active" ]]; then
-        active_profile=$(cat "$CCM_OAUTH_DIR/active")
-    fi
-
-    local count=0
-    echo -e "${BLUE}$(t 'header_oauth_profiles' 'OAuth Profiles:')${NC}"
-    echo "----------------------------------------"
-
-    for token_file in "$CCM_OAUTH_DIR"/*.token; do
-        [[ -f "$token_file" ]] || continue
-
-        local profile_name
-        profile_name=$(basename "$token_file" .token)
-        count=$((count + 1))
-
-        local email=""
-        local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
-        if [[ -f "$email_file" ]]; then
-            email=$(cat "$email_file")
-        fi
-
-        local status=""
-        if [[ "$profile_name" == "$active_profile" ]]; then
-            status=" ${GREEN}[active]${NC}"
-        fi
-
-        if [[ -n "$email" ]]; then
-            echo -e "${GREEN}$profile_name${NC} ($email)$status"
-        else
-            echo -e "${GREEN}$profile_name${NC}$status"
-        fi
-    done
-
-    if [[ $count -eq 0 ]]; then
-        echo "$(t 'info_no_oauth_profiles' 'No OAuth profiles found')"
-        echo "$(t 'hint_oauth_create' 'Use: ccm oauth-create <name>')"
-    else
-        echo "----------------------------------------"
-        echo "$(t 'info_total_profiles' "Total: $count profile(s)")"
-    fi
-}
-
-oauth_delete() {
-    set_no_color
-
-    if [[ $# -lt 1 ]]; then
-        echo "$(t 'error_oauth_name_required' 'Error: OAuth profile name required')" >&2
-        echo "$(t 'usage_oauth_delete' 'Usage: ccm oauth-delete <name>')" >&2
-        return 1
-    fi
-
-    local profile_name
-    profile_name=$(sanitize_account_name "$1") || return 1
-
-    local token_file="$CCM_OAUTH_DIR/${profile_name}.token"
-    local email_file="$CCM_OAUTH_DIR/${profile_name}.email"
-    local config_file="$CCM_CONFIGS_DIR/${profile_name}.claude.json"
-
-    if [[ ! -f "$token_file" ]]; then
-        echo -e "${RED}$(t 'error_oauth_profile_not_found' "OAuth profile '$profile_name' not found")${NC}" >&2
-        return 1
-    fi
-
-    rm -f "$token_file" "$email_file" "$config_file"
-
-    local active_profile=""
-    if [[ -f "$CCM_OAUTH_DIR/active" ]]; then
-        active_profile=$(cat "$CCM_OAUTH_DIR/active")
-    fi
-
-    if [[ "$profile_name" == "$active_profile" ]]; then
-        rm -f "$CCM_OAUTH_DIR/active"
-    fi
-
-    echo -e "${GREEN}$(t 'success_oauth_deleted' "OAuth profile '$profile_name' deleted")${NC}"
-}
-
-oauth_status() {
-    set_no_color
-
-    echo "$(t 'header_oauth_status' '=== OAuth Status ===')"
-    echo ""
-
-    local active_profile=""
-    if [[ -f "$CCM_OAUTH_DIR/active" ]]; then
-        active_profile=$(cat "$CCM_OAUTH_DIR/active")
-    fi
-
-    if [[ -n "$active_profile" ]]; then
-        echo -e "$(t 'label_active_profile' 'Active profile'): ${GREEN}$active_profile${NC}"
-
-        local email_file="$CCM_OAUTH_DIR/${active_profile}.email"
-        if [[ -f "$email_file" ]]; then
-            local email
-            email=$(cat "$email_file")
-            echo "$(t 'label_email' 'Email'): $email"
-        fi
-
-        local token_file="$CCM_OAUTH_DIR/${active_profile}.token"
-        if [[ -f "$token_file" ]]; then
-            local token
-            token=$(cat "$token_file")
-            echo "$(t 'label_token' 'Token'): $(mask_token "$token")"
-        fi
-    else
-        echo "$(t 'info_no_active_oauth' 'No active OAuth profile')"
-    fi
-
-    echo ""
-
-    local env_token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
-    if [[ -n "$env_token" ]]; then
-        echo "$(t 'label_env_oauth_token' 'CLAUDE_CODE_OAUTH_TOKEN'): $(mask_token "$env_token")"
-    else
-        echo "$(t 'label_env_oauth_token' 'CLAUDE_CODE_OAUTH_TOKEN'): $(t 'status_not_set' 'not set')"
-    fi
-}
 
 switch_to_claude() {
     echo "unset ANTHROPIC_BASE_URL"
@@ -707,13 +867,6 @@ Account Management (API Token):
   delete-account <name>     Delete a saved account
   current-account           Show currently active account
 
-OAuth Account Management (Claude.ai Subscription):
-  oauth-create <name>       Create new OAuth profile (runs claude login)
-  oauth-switch <name>       Switch to a saved OAuth profile
-  oauth-list                List all saved OAuth profiles
-  oauth-delete <name>       Delete an OAuth profile
-  oauth-status              Show OAuth account status
-
 Info & Configuration:
   status, st                Show current configuration
   help, -h, --help          Show this help message
@@ -724,16 +877,11 @@ Examples:
   ccm save-account work     Save current token as 'work' account
   ccm switch-account work   Switch to 'work' account
   ccm list-accounts         List all saved accounts
-
-OAuth Examples:
-  ccm oauth-create personal Create OAuth profile 'personal'
-  ccm oauth-create work     Create OAuth profile 'work'
-  ccm oauth-switch personal Switch to OAuth profile 'personal'
-  ccm oauth-list            List all OAuth profiles
+  ccm save-account --oauth personal  Create OAuth account 'personal'
 
 Launcher (ccc):
-  ccc oauth:personal        Switch to OAuth 'personal' and launch
-  ccc opus:oauth:work       Switch to OAuth 'work' with Opus model
+  ccc personal              Switch to 'personal' account and launch
+  ccc opus:work             Switch to 'work' account with Opus model
 
 Configuration:
   Config file: ~/.ccm_config
@@ -754,6 +902,7 @@ EOF
 
 main() {
     load_config
+    migrate_accounts_v4
 
     if [[ $# -eq 0 ]]; then
         show_help
@@ -799,21 +948,6 @@ main() {
             ;;
         current-account)
             current_account
-            ;;
-        oauth-create)
-            oauth_create "$@"
-            ;;
-        oauth-switch)
-            oauth_switch "$@"
-            ;;
-        oauth-list)
-            oauth_list
-            ;;
-        oauth-delete)
-            oauth_delete "$@"
-            ;;
-        oauth-status)
-            oauth_status
             ;;
         status|st)
             show_status

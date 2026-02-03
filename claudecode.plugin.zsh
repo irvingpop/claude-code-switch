@@ -30,11 +30,8 @@ ccm() {
   fi
 
   case "$1" in
-    ""|"help"|"-h"|"--help"|"status"|"st"|"save-account"|"switch-account"|"list-accounts"|"delete-account"|"current-account"|"oauth-create"|"oauth-list"|"oauth-delete"|"oauth-status")
+    ""|"help"|"-h"|"--help"|"status"|"st"|"list-accounts"|"delete-account"|"current-account")
       "$script" "$@"
-      ;;
-    "oauth-switch")
-      source <("$script" "$@")
       ;;
     *)
       source <("$script" "$@")
@@ -51,19 +48,14 @@ ccc() {
 Usage: ccc <model> [claude-options]
        ccc <account> [claude-options]
        ccc <model>:<account> [claude-options]
-       ccc oauth:<profile> [claude-options]
-       ccc <model>:oauth:<profile> [claude-options]
 
 Examples:
   ccc sonnet                          # Launch with Sonnet
   ccc opus                            # Launch with Opus
   ccc work                            # Switch to 'work' account and launch
   ccc opus:work                       # Switch to 'work' account and launch Opus
+  ccc personal                        # Switch to 'personal' account (auto-detects type)
   ccc sonnet --dangerously-skip-permissions
-
-OAuth Examples:
-  ccc oauth:personal                  # Switch to OAuth profile 'personal'
-  ccc opus:oauth:work                 # Switch to OAuth 'work' with Opus
 
 Available models:
   sonnet, s    Claude Sonnet 4.5 (default)
@@ -105,17 +97,7 @@ EOF
     esac
   }
 
-  if [[ "$model" == oauth:* ]]; then
-    local oauth_profile="${model#oauth:}"
-    echo ">> Switching to OAuth profile $oauth_profile..."
-    ccm oauth-switch "$oauth_profile" || return 1
-    _switch_model "sonnet" || return 1
-  elif [[ "$model" == *:oauth:* ]]; then
-    IFS=':' read -r model_part _ oauth_profile <<< "$model"
-    echo ">> Switching to OAuth profile $oauth_profile with $model_part..."
-    ccm oauth-switch "$oauth_profile" || return 1
-    _switch_model "$model_part" || return 1
-  elif [[ "$model" == *:* ]]; then
+  if [[ "$model" == *:* ]]; then
     echo ">> Switching to $model..."
     IFS=':' read -r model_part account_part <<< "$model"
     ccm switch-account "$account_part" || return 1

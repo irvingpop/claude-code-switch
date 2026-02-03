@@ -8,22 +8,14 @@ _ccm_accounts() {
   fi
 }
 
-_ccm_oauth_profiles() {
-  local profiles
-  local oauth_dir="${HOME}/.ccm/oauth"
-  if [[ -d "$oauth_dir" ]]; then
-    profiles=(${(f)"$(ls "$oauth_dir"/*.token 2>/dev/null | xargs -n1 basename | sed 's/\.token$//')"})
-    _describe 'oauth-profile' profiles
-  fi
-}
-
 _ccm() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
 
   _arguments -C \
     '1: :->command' \
-    '2: :->argument'
+    '2: :->argument' \
+    '3: :->argument'
 
   case $state in
     command)
@@ -35,16 +27,11 @@ _ccm() {
         'o:Switch to Claude Opus 4.5 (alias)'
         'haiku:Switch to Claude Haiku 4.5'
         'h:Switch to Claude Haiku 4.5 (alias)'
-        'save-account:Save current ANTHROPIC_AUTH_TOKEN as named account'
-        'switch-account:Switch to a saved account'
-        'list-accounts:List all saved accounts'
-        'delete-account:Delete a saved account'
-        'current-account:Show currently active account'
-        'oauth-create:Create new OAuth profile'
-        'oauth-switch:Switch to a saved OAuth profile'
-        'oauth-list:List all saved OAuth profiles'
-        'oauth-delete:Delete an OAuth profile'
-        'oauth-status:Show OAuth account status'
+        'save-account:Save current token as named account (use --oauth for OAuth)'
+        'switch-account:Switch to a saved account (auto-detects type)'
+        'list-accounts:List all saved accounts (shows API and OAuth)'
+        'delete-account:Delete a saved account (handles both types)'
+        'current-account:Show currently active account with type'
         'status:Show current configuration'
         'st:Show current configuration (alias)'
         'help:Show help message'
@@ -53,14 +40,24 @@ _ccm() {
       ;;
     argument)
       case ${words[2]} in
+        save-account)
+          # Offer --oauth flag or account name
+          if [[ ${words[3]} == "" ]]; then
+            local -a opts
+            opts=(
+              '--oauth:Create OAuth account (runs claude setup-token)'
+            )
+            _describe 'option or account' opts
+            _ccm_accounts
+          else
+            _ccm_accounts
+          fi
+          ;;
         switch-account|delete-account)
           _ccm_accounts
           ;;
         sonnet|s|opus|o|haiku|h)
           _ccm_accounts
-          ;;
-        oauth-switch|oauth-delete)
-          _ccm_oauth_profiles
           ;;
       esac
       ;;
