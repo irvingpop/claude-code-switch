@@ -85,11 +85,8 @@ ccm() {
   fi
 
   case "$1" in
-    ""|"help"|"-h"|"--help"|"status"|"st"|"save-account"|"switch-account"|"list-accounts"|"delete-account"|"current-account"|"oauth-create"|"oauth-list"|"oauth-delete"|"oauth-status")
+    ""|"help"|"-h"|"--help"|"status"|"st"|"list-accounts"|"delete-account"|"current-account")
       "$script" "$@"
-      ;;
-    "oauth-switch")
-      source <("$script" "$@")
       ;;
     *)
       source <("$script" "$@")
@@ -104,19 +101,14 @@ ccc() {
     echo "Usage: ccc <model> [claude-options]"
     echo "       ccc <account> [claude-options]"
     echo "       ccc <model>:<account> [claude-options]"
-    echo "       ccc oauth:<profile> [claude-options]"
-    echo "       ccc <model>:oauth:<profile> [claude-options]"
     echo ""
     echo "Examples:"
     echo "  ccc sonnet                          # Launch with Sonnet"
     echo "  ccc opus                            # Launch with Opus"
     echo "  ccc work                            # Switch to 'work' account and launch"
     echo "  ccc opus:work                       # Switch to 'work' account and launch Opus"
+    echo "  ccc personal                        # Switch to 'personal' account (auto-detects type)"
     echo "  ccc sonnet --dangerously-skip-permissions"
-    echo ""
-    echo "OAuth Examples:"
-    echo "  ccc oauth:personal                  # Switch to OAuth profile 'personal'"
-    echo "  ccc opus:oauth:work                 # Switch to OAuth 'work' with Opus"
     echo ""
     echo "Available models:"
     echo "  sonnet, s    Claude Sonnet 4.5 (default)"
@@ -157,17 +149,7 @@ ccc() {
     esac
   }
 
-  if [[ "$model" == oauth:* ]]; then
-    local oauth_profile="${model#oauth:}"
-    echo ">> Switching to OAuth profile $oauth_profile..."
-    ccm oauth-switch "$oauth_profile" || return 1
-    _switch_model "sonnet" || return 1
-  elif [[ "$model" == *:oauth:* ]]; then
-    IFS=':' read -r model_part _ oauth_profile <<< "$model"
-    echo ">> Switching to OAuth profile $oauth_profile with $model_part..."
-    ccm oauth-switch "$oauth_profile" || return 1
-    _switch_model "$model_part" || return 1
-  elif [[ "$model" == *:* ]]; then
+  if [[ "$model" == *:* ]]; then
     echo ">> Switching to $model..."
     IFS=':' read -r model_part account_part <<< "$model"
     ccm switch-account "$account_part" || return 1
